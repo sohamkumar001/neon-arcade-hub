@@ -22,6 +22,8 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-user-drag: none;
+  overscroll-behavior-y: none;
+  touch-action: pan-x pan-y;
 }
 
 /* CRT Scanline Overlay from Design Theme */
