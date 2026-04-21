@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Overdrive 2D - Pro AI Edition</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        :root { --neon: #00f2ff; --pink: #ff0077; --bg: #050508; }
+        
+* {
+    margin: 0; padding: 0; box-sizing: border-box; touch-action: none;
+    -webkit-user-select: none; /* Safari */
+    -moz-user-select: none;    /* Firefox */
+    -ms-user-select: none;     /* IE/Edge */
+    user-select: none;         /* Standard */
+    -webkit-user-drag: none;   /* Prevents dragging elements in Webkit */
+}
+        body { background: #000; color: white; font-family: 'VT323', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background: var(--bg); border: 4px solid #1a1a2e; box-shadow: 0 0 30px rgba(0, 0, 0, 0.5); border-radius: 4px; }
+        #ui { position: absolute; top: 20px; text-align: center; pointer-events: none; width: 100%; z-index: 5; }
+        #score-box { display: inline-block; background: rgba(0,0,0,0.8); padding: 5px 25px; border: 2px solid var(--neon); border-radius: 2px; }
+        #score { font-size: 2.8rem; color: var(--neon); text-shadow: 0 0 10px var(--neon); }
+        #menu { position: absolute; inset: 0; background: rgba(5, 5, 8, 0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; backdrop-filter: blur(5px); }
+        .title { font-size: 4rem; color: var(--pink); text-shadow: 0 0 20px var(--pink); margin-bottom: 5px; }
+        .subtitle { color: var(--neon); margin-bottom: 30px; font-size: 1.2rem; letter-spacing: 2px; }
+        button { background: transparent; border: 2px solid var(--neon); color: var(--neon); padding: 12px 40px; font-size: 1.8rem; cursor: pointer; font-family: 'VT323', monospace; transition: 0.3s; }
+        button:hover { background: var(--neon); color: #000; box-shadow: 0 0 30px var(--neon); }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="score-box">
+            <div id="score">0000</div>
+        </div>
+    </div>
+
+    <div id="menu">
+        <div class="title">NEON_DRIFT</div>
+        <div class="subtitle">MAX_VELOCITY_PROTOCOL</div>
+        <p id="last-score" style="margin-bottom: 25px; font-size: 1.8rem; color: #fff;"></p>
+        <button onclick="start()">ENGAGE_ENGINE</button>
+    </div>
+
+    <canvas id="c"></canvas>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const menu = document.getElementById('menu');
+    const lastScoreEl = document.getElementById('last-score');
+
+    const WIDTH = 320, HEIGHT = 480;
+    const LANE_X = [85, 160, 235]; 
+    
+    let gameActive = false, score = 0, roadOffset = 0;
+    let player = { x: 160, y: 400, targetX: 160, w: 28, h: 52 };
+    let vehicles = [];
+    let speed = 4;
+    let timeMultiplier = 1;
+    let lastSpawn = 0;
+
+    function init() {
+        const h = window.innerHeight - 20;
+        const w = Math.min(window.innerWidth - 20, h * (WIDTH/HEIGHT));
+        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+        canvas.width = WIDTH; canvas.height = HEIGHT;
+    }
+
+    const updateInput = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+        const scale = WIDTH / rect.width;
+        player.targetX = (clientX - rect.left) * scale;
+        player.targetX = Math.max(75, Math.min(245, player.targetX));
+    };
+
+    window.addEventListener('mousemove', updateInput);
+    window.addEventListener('touchmove', updateInput, {passive: false});
+
+    function spawnVehicle() {
+        const laneIdx = Math.floor(Math.random() * 3);
+        const lane = LANE_X[laneIdx];
+        if (vehicles.some(v => v.y < 150 && Math.abs(v.x - lane) < 20)) return;
+
+        const isTruck = Math.random() > 0.85;
+        // Natural matte car colors
+        const carColors = ['#c21d1d', '#2c3e50', '#7f8c8d', '#f1c40f', '#27ae60'];
+        
+        vehicles.push({
+            x: lane,
+            y: -100,
+            targetX: lane,
+            laneIdx: laneIdx,
+            w: 28,
+            h: isTruck ? 85 : 52,
+            speed: 1.5 + Math.random() * 2, 
+            color: isTruck ? '#333' : carColors[Math.floor(Math.random() * carColors.length)],
+            type: isTruck ? 'truck' : 'car',
+            changingLane: 0, // -1 left, 1 right, 0 none
+            blinkTimer: 0
+        });
+    }
+
+    function drawDetailedCar(v, isPlayer = false) {
+        ctx.save();
+        ctx.translate(v.x, v.y);
+        
+        if (isPlayer) {
+            const tilt = (player.targetX - player.x) * 0.04;
+            ctx.rotate(tilt);
+        }
+
+        // 1. Tires (Recessed)
+        ctx.fillStyle = '#111';
+        const wheelW = 5, wheelH = 12;
+        ctx.fillRect(-v.w/2 - 1, -v.h/2 + 8, wheelW, wheelH); 
+        ctx.fillRect(v.w/2 - 4, -v.h/2 + 8, wheelW, wheelH); 
+        ctx.fillRect(-v.w/2 - 1, v.h/2 - 20, wheelW, wheelH); 
+        ctx.fillRect(v.w/2 - 4, v.h/2 - 20, wheelW, wheelH); 
+
+        // 2. Body Shadow (Depth)
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(-v.w/2 + 2, -v.h/2 + 2, v.w, v.h);
+
+        // 3. Main Body Paint
+        let bodyColor = isPlayer ? '#00f2ff' : v.color;
+        ctx.fillStyle = bodyColor;
+        ctx.beginPath();
+        ctx.roundRect(-v.w/2, -v.h/2, v.w, v.h, 4);
+        ctx.fill();
+
+        // 4. Roof/Windows (adds realism)
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; // Black glass
+        ctx.fillRect(-v.w/2 + 3, -v.h/4, v.w - 6, v.h/2); // Roof
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.1)'; // Reflection
+        ctx.fillRect(-v.w/2 + 4, -v.h/2 + 10, v.w - 8, 8); // Windshield
+
+        // 5. Grille & Tail
+        ctx.fillStyle = '#222';
+        ctx.fillRect(-v.w/2 + 5, -v.h/2, v.w - 10, 2); // Front Grille
+
+        // 6. Lights
+        const blink = Math.floor(Date.now() / 250) % 2 === 0;
+        
+        if (isPlayer) {
+            // Player headlights
+            ctx.fillStyle = '#fff';
+            ctx.shadowBlur = 15; ctx.shadowColor = '#fff';
+            ctx.fillRect(-v.w/2 + 2, -v.h/2, 7, 3);
+            ctx.fillRect(v.w/2 - 9, -v.h/2, 7, 3);
+        } else {
+            // NPC Tail lights
+            ctx.fillStyle = '#800000'; // Dim red
+            ctx.fillRect(-v.w/2 + 2, v.h/2 - 3, 6, 3);
+            ctx.fillRect(v.w/2 - 8, v.h/2 - 3, 6, 3);
+
+            // NPC Turn Signals (Blinkers)
+            if (v.changingLane !== 0 && blink) {
+                ctx.fillStyle = '#ffa500';
+                ctx.shadowBlur = 10; ctx.shadowColor = '#ffa500';
+                const bx = v.changingLane === -1 ? -v.w/2 - 2 : v.w/2 - 4;
+                ctx.fillRect(bx, -v.h/2 + 5, 6, 4); // Front signal
+                ctx.fillRect(bx, v.h/2 - 10, 6, 4);  // Rear signal
+            }
+        }
+
+        ctx.restore();
+    }
+
+    function handleAI(v, index) {
+        // AI Logic: Check if car is blocked
+        let blocked = false;
+        for (let other of vehicles) {
+            if (other === v) continue;
+            // If car in front in same lane
+            if (other.laneIdx === v.laneIdx && other.y < v.y && v.y - other.y < 120) {
+                blocked = true;
+                break;
+            }
+        }
+
+        // Try to change lane if blocked
+        if (blocked && v.changingLane === 0) {
+            let possibleLanes = [];
+            if (v.laneIdx > 0) possibleLanes.push(v.laneIdx - 1);
+            if (v.laneIdx < 2) possibleLanes.push(v.laneIdx + 1);
+            
+            for (let lIdx of possibleLanes) {
+                // Check if target lane is clear
+                let laneClear = !vehicles.some(other => 
+                    other.laneIdx === lIdx && Math.abs(other.y - v.y) < 100
+                );
+                if (laneClear) {
+                    v.changingLane = lIdx < v.laneIdx ? -1 : 1;
+                    v.laneIdx = lIdx;
+                    v.targetX = LANE_X[lIdx];
+                    break;
+                }
+            }
+        }
+
+        // Smoothly move to target lane
+        if (v.x !== v.targetX) {
+            v.x += (v.targetX - v.x) * 0.05;
+            if (Math.abs(v.x - v.targetX) < 1) {
+                v.x = v.targetX;
+                v.changingLane = 0;
+            }
+        }
+    }
+
+    function start() {
+        score = 0; speed = 4; timeMultiplier = 1; vehicles = []; 
+        player.x = 160; player.targetX = 160;
+        gameActive = true; menu.style.display = 'none';
+        requestAnimationFrame(loop);
+    }
+
+    function loop(time) {
+        if (!gameActive) return;
+
+        timeMultiplier += 0.00015;
+        speed += 0.002 * timeMultiplier; 
+        
+        score += speed / 20;
+        scoreEl.innerText = Math.floor(score).toString().padStart(4, '0');
+        
+        roadOffset = (roadOffset + speed) % 80;
+        player.x += (player.targetX - player.x) * 0.12;
+
+        let spawnRate = Math.max(400, 1600 - (speed * 70));
+        if (time - lastSpawn > spawnRate) {
+            spawnVehicle();
+            lastSpawn = time;
+        }
+
+        // Draw Road
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        // Shoulder/Gutter lines
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(50, 0, 5, HEIGHT);
+        ctx.fillRect(265, 0, 5, HEIGHT);
+
+        // Dashed Lane Lines
+        ctx.fillStyle = '#22223b';
+        for(let i = -80; i < HEIGHT; i += 80) {
+            ctx.fillRect(121, i + roadOffset, 2, 40);
+            ctx.fillRect(196, i + roadOffset, 2, 40);
+        }
+
+        // Vehicle Logic
+        for (let i = vehicles.length - 1; i >= 0; i--) {
+            let v = vehicles[i];
+            v.y += (speed - v.speed);
+            
+            handleAI(v, i);
+            drawDetailedCar(v);
+
+            // Precision collision
+            if (Math.abs(v.x - player.x) < 22 && Math.abs(v.y - player.y) < 42) {
+                gameOver();
+            }
+            if (v.y > HEIGHT + 120 || v.y < -200) vehicles.splice(i, 1);
+        }
+
+        drawDetailedCar(player, true);
+        requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+        gameActive = false;
+        menu.style.display = 'flex';
+        lastScoreEl.innerText = `TOTAL_DISTANCE: ${Math.floor(score)}m`;
+    }
+
+    window.addEventListener('resize', init);
+    init();
+</script>
+</body>
+</html>

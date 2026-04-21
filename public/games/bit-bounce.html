@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bit-Bounce Multi</title>
+    <style>
+        :root { --bg: #0d1101; --ui: #8dbd0c; --acc: #ffffff; }
+        * { touch-action: none; user-select: none; margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #000; color: var(--ui);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; font-family: 'Courier New', monospace; overflow: hidden;
+        }
+        #ui-top { width: 320px; display: flex; justify-content: space-between; padding: 10px; font-weight: bold; }
+        #game-wrapper { position: relative; border: 8px solid #222; width: 320px; height: 480px; box-shadow: 0 0 20px rgba(141,189,12,0.2); }
+        canvas { display: block; background-color: var(--bg); image-rendering: pixelated; }
+        .overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.95);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; text-align: center;
+        }
+        button {
+            margin-top: 15px; padding: 12px; width: 200px;
+            background: var(--ui); border: none; color: #000;
+            font-weight: bold; font-family: inherit; cursor: pointer;
+            box-shadow: 4px 4px 0px #444;
+        }
+        button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px #444; }
+        .hidden { display: none !important; }
+        .hint { font-size: 0.7rem; margin-top: 10px; opacity: 0.6; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-top">
+        <div>P1: <span id="s1">0</span></div>
+        <div id="p2-ui">P2: <span id="s2">0</span></div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="menu" class="overlay">
+            <h1>BIT-BOUNCE</h1>
+            <button onclick="start(1)">1 PLAYER (VS AI)</button>
+            <button id="btn-2p" onclick="start(2)">2 PLAYERS (LOCAL)</button>
+        </div>
+
+        <div id="over" class="overlay hidden">
+            <h1 id="res-text">GAME OVER</h1>
+            <button onclick="showMenu()">MAIN MENU</button>
+        </div>
+    </div>
+
+    <div class="hint" id="hint-text">PC: A/D to Move</div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const W = 320, H = 480;
+        canvas.width = W; canvas.height = H;
+
+        let mode = 1; // 1 = AI, 2 = Local PvP
+        let active = false;
+        let score1 = 0, score2 = 0, shake = 0;
+        let particles = [];
+        
+        const p1 = { x: W/2-35, y: H-30, w: 70, h: 10, targetX: W/2-35 };
+        const p2 = { x: W/2-35, y: 20, w: 70, h: 10, targetX: W/2-35 };
+        const ball = { x: W/2, y: H/2, r: 5, vx: 3, vy: 3, speed: 4 };
+
+        // Check if mobile
+        const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        if (!isMobile) {
+            document.getElementById('btn-2p').classList.add('hidden');
+            document.getElementById('hint-text').innerText = "PC: Use A & D to move paddle";
+        } else {
+            document.getElementById('hint-text').innerText = "Touch & Drag to move paddles";
+        }
+
+        // --- Audio ---
+        const audio = new (window.AudioContext || window.webkitAudioContext)();
+        function sfx(f, d, t='square') {
+            if(audio.state === 'suspended') audio.resume();
+            const o = audio.createOscillator(), g = audio.createGain();
+            o.type = t; o.frequency.value = f;
+            g.gain.setValueAtTime(0.1, audio.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audio.currentTime + d);
+            o.connect(g); g.connect(audio.destination);
+            o.start(); o.stop(audio.currentTime + d);
+        }
+
+        // --- Controls ---
+        const keys = {};
+        window.addEventListener("keydown", e => keys[e.code] = true);
+        window.addEventListener("keyup", e => keys[e.code] = false);
+
+        // Multitouch Logic
+        const touches = {};
+        canvas.addEventListener("touchstart", e => {
+            for(let t of e.changedTouches) touches[t.identifier] = t.clientX;
+        });
+        canvas.addEventListener("touchmove", e => {
+            const rect = canvas.getBoundingClientRect();
+            for(let t of e.changedTouches) {
+                const tx = (t.clientX - rect.left) * (W / rect.width);
+                const ty = (t.clientY - rect.top) * (H / rect.height);
+                
+                // If touch is in bottom half, control P1. Top half, P2.
+                if (ty > H/2) p1.targetX = tx - p1.w/2;
+                else if (mode === 2) p2.targetX = tx - p2.w/2;
+            }
+            e.preventDefault();
+        }, {passive: false});
+
+        function showMenu() {
+            document.getElementById('over').classList.add('hidden');
+            document.getElementById('menu').classList.remove('hidden');
+            active = false;
+        }
+
+        function start(m) {
+            mode = m; active = true;
+            score1 = 0; score2 = 0;
+            updateUI();
+            resetBall();
+            document.getElementById('menu').classList.add('hidden');
+            loop();
+        }
+
+        function resetBall() {
+            ball.x = W/2; ball.y = H/2;
+            ball.vx = (Math.random() > 0.5 ? 3 : -3);
+            ball.vy = (Math.random() > 0.5 ? 3 : -3);
+            ball.speed = 4;
+        }
+
+        function updateUI() {
+            document.getElementById('s1').innerText = score1;
+            document.getElementById('s2').innerText = score2;
+        }
+
+        function loop() {
+            if(!active) return;
+            
+            // P1 Movement
+            if(keys['KeyA']) p1.targetX -= 8;
+            if(keys['KeyD']) p1.targetX += 8;
+            
+            // AI Logic (Only on PC or 1P mode)
+            if(mode === 1) {
+                let aiSpeed = 3.5 + (ball.speed * 0.1); // Scaled difficulty
+                if (ball.vy < 0) { // Ball coming towards AI
+                    if (p2.x + p2.w/2 < ball.x - 10) p2.targetX += aiSpeed;
+                    else if (p2.x + p2.w/2 > ball.x + 10) p2.targetX -= aiSpeed;
+                }
+            }
+
+            // Apply movement
+            [p1, p2].forEach(p => {
+                if(p.targetX < 0) p.targetX = 0;
+                if(p.targetX > W - p.w) p.targetX = W - p.w;
+                p.x += (p.targetX - p.x) * 0.2;
+            });
+
+            // Ball Physics
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Wall Bounce
+            if(ball.x < 5 || ball.x > W-5) { ball.vx *= -1; sfx(200, 0.05, 'triangle'); }
+
+            // Paddle Collisions
+            if(ball.vy > 0 && ball.y > p1.y - 5 && ball.x > p1.x && ball.x < p1.x + p1.w) {
+                ball.vy *= -1.05; 
+                ball.vx = (ball.x - (p1.x + p1.w/2)) * 0.25;
+                sfx(400, 0.1); shake = 4;
+            }
+            if(ball.vy < 0 && ball.y < p2.y + p2.h + 5 && ball.x > p2.x && ball.x < p2.x + p2.w) {
+                ball.vy *= -1.05; 
+                ball.vx = (ball.x - (p2.x + p2.w/2)) * 0.25;
+                sfx(500, 0.1); shake = 4;
+            }
+
+            // Scoring
+            if(ball.y < 0) { score1++; sfx(100, 0.3, 'sawtooth'); resetBall(); updateUI(); }
+            if(ball.y > H) { score2++; sfx(100, 0.3, 'sawtooth'); resetBall(); updateUI(); }
+
+            if(score1 >= 5 || score2 >= 5) {
+                active = false;
+                document.getElementById('res-text').innerText = score1 >= 5 ? "P1 VICTORIOUS" : (mode === 1 ? "AI DOMINATED" : "P2 VICTORIOUS");
+                document.getElementById('over').classList.remove('hidden');
+            }
+
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function draw() {
+            ctx.fillStyle = "#0d1101";
+            ctx.fillRect(0, 0, W, H);
+            
+            ctx.save();
+            if(shake > 0) { ctx.translate(Math.random()*shake, Math.random()*shake); shake *= 0.9; }
+
+            // Field line
+            ctx.strokeStyle = "#1a1f05";
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+
+            // Paddles
+            ctx.fillStyle = "#8dbd0c";
+            ctx.fillRect(p1.x, p1.y, p1.w, p1.h);
+            ctx.fillRect(p2.x, p2.y, p2.w, p2.h);
+
+            // Ball
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(ball.x-ball.r, ball.y-ball.r, ball.r*2, ball.r*2);
+
+            ctx.restore();
+        }
+    </script>
+</body>
+</html>

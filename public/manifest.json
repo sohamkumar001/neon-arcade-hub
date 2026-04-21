@@ -1,0 +1,22 @@
+{
+  "name": "Pixel Arcade 17",
+  "short_name": "Arcade17",
+  "description": "Retro 16-bit arcade hub with 17 mini-games.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050508",
+  "theme_color": "#00ff41",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/arcade/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/arcade/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

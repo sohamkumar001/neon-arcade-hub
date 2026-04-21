@@ -1,0 +1,6 @@
+{
+  "name": "Neon Arcade Hub",
+  "description": "A 16-bit retro arcade hub featuring 17 mini-games with a CRT aesthetic and fluid pixel-art UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon-Bit Eater</title>
+    <style>
+        :root { --neon: #bc13fe; --bg: #050508; --bit: #00ff88; }
+        * { touch-action: none; user-select: none; margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        
+        #game-box {
+            position: relative; width: 100vw; height: 100vh;
+            max-width: 450px; max-height: 800px;
+            background: var(--bg); border: 2px solid #1a1a2e;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        #ui {
+            position: absolute; top: 20px; width: 100%;
+            display: flex; justify-content: space-around;
+            color: var(--neon); font-size: 1.2rem; font-weight: bold; z-index: 5;
+            text-shadow: 0 0 10px var(--neon);
+        }
+        #menu {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; color: #fff; text-align: center; padding: 20px;
+        }
+        .btn {
+            background: var(--neon); color: #fff; border: none;
+            padding: 15px 40px; margin-top: 20px; font-weight: bold;
+            font-family: inherit; cursor: pointer; box-shadow: 0 0 15px var(--neon);
+        }
+        #timer-bar {
+            position: absolute; bottom: 0; left: 0; height: 4px;
+            background: var(--bit); width: 100%; transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-box">
+    <div id="ui">
+        <div>DATA: <span id="score">0</span></div>
+        <div>TIME: <span id="timer-text">100</span>%</div>
+    </div>
+    <canvas id="c"></canvas>
+    <div id="timer-bar"></div>
+    <div id="menu">
+        <h1 style="color:var(--neon); font-size: 2.2rem;">BIT EATER</h1>
+        <p id="f-stats" style="margin: 15px; opacity: 0.8;"></p>
+        <button class="btn" onclick="start()">INJECT VIRUS</button>
+        <p style="margin-top: 20px; font-size: 0.8rem; opacity: 0.5;">SWIPE OR WASD TO MOVE</p>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const timerBar = document.getElementById('timer-bar');
+    const menu = document.getElementById('menu');
+
+    let w, h, score, timeLeft, gameActive = false;
+    let pos = { x: 0, y: 0 };
+    let bit = { x: 2, y: 2 };
+    const GRID = 4;
+
+    function init() {
+        w = canvas.width = canvas.offsetWidth;
+        h = canvas.height = canvas.offsetHeight;
+    }
+
+    // Input Handling (Swipes + Keys)
+    let ts;
+    window.addEventListener('touchstart', e => ts = {x:e.touches[0].clientX, y:e.touches[0].clientY});
+    window.addEventListener('touchend', e => {
+        if(!ts || !gameActive) return;
+        const dx = e.changedTouches[0].clientX - ts.x, dy = e.changedTouches[0].clientY - ts.y;
+        if(Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1, 0);
+        else move(0, dy > 0 ? 1 : -1);
+        ts = null;
+    });
+    window.addEventListener('keydown', e => {
+        if(!gameActive) return;
+        if(e.key.includes('Up') || e.key === 'w') move(0, -1);
+        if(e.key.includes('Down') || e.key === 's') move(0, 1);
+        if(e.key.includes('Left') || e.key === 'a') move(-1, 0);
+        if(e.key.includes('Right') || e.key === 'd') move(1, 0);
+    });
+
+    function move(x, y) {
+        pos.x = Math.max(0, Math.min(GRID - 1, pos.x + x));
+        pos.y = Math.max(0, Math.min(GRID - 1, pos.y + y));
+        checkEat();
+    }
+
+    function checkEat() {
+        if(pos.x === bit.x && pos.y === bit.y) {
+            score += 10;
+            scoreEl.innerText = score;
+            timeLeft = Math.min(100, timeLeft + 15);
+            spawnBit();
+        }
+    }
+
+    function spawnBit() {
+        bit.x = Math.floor(Math.random() * GRID);
+        bit.y = Math.floor(Math.random() * GRID);
+        if(bit.x === pos.x && bit.y === pos.y) spawnBit();
+    }
+
+    function start() {
+        score = 0; timeLeft = 100; pos = {x:0, y:0};
+        scoreEl.innerText = "0";
+        spawnBit();
+        gameActive = true;
+        menu.style.display = 'none';
+        loop();
+    }
+
+    function loop() {
+        if(!gameActive) return;
+        
+        timeLeft -= 0.25 + (score / 500); // Gets faster
+        timerBar.style.width = timeLeft + "%";
+        document.getElementById('timer-text').innerText = Math.ceil(timeLeft);
+
+        if(timeLeft <= 0) return gameOver();
+
+        ctx.fillStyle = '#050508';
+        ctx.fillRect(0, 0, w, h);
+
+        const sz = Math.min(w, h) / (GRID + 1);
+        const ox = (w - sz * GRID) / 2;
+        const oy = (h - sz * GRID) / 2;
+
+        // Grid
+        ctx.strokeStyle = '#1a1a2e';
+        for(let i=0; i<=GRID; i++) {
+            ctx.beginPath(); ctx.moveTo(ox+i*sz, oy); ctx.lineTo(ox+i*sz, oy+GRID*sz); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ox, oy+i*sz); ctx.lineTo(ox+GRID*sz, oy+i*sz); ctx.stroke();
+        }
+
+        // Bit
+        ctx.fillStyle = '#00ff88';
+        ctx.shadowBlur = 20; ctx.shadowColor = '#00ff88';
+        ctx.beginPath();
+        ctx.arc(ox + bit.x*sz + sz/2, oy + bit.y*sz + sz/2, sz/4, 0, Math.PI*2);
+        ctx.fill();
+
+        // Player
+        ctx.fillStyle = '#bc13fe';
+        ctx.shadowColor = '#bc13fe';
+        ctx.fillRect(ox + pos.x*sz + sz*0.2, oy + pos.y*sz + sz*0.2, sz*0.6, sz*0.6);
+        ctx.shadowBlur = 0;
+
+        requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+        gameActive = false;
+        document.getElementById('f-stats').innerText = "CONNECTION LOST | DATA: " + score;
+        menu.style.display = 'flex';
+    }
+
+    window.onload = init;
+    window.onresize = init;
+</script>
+</body>
+</html>

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>16-Bit Galaxy Overlord</title>
+    <style>
+        :root {
+            --ui-color: #8dbd0c;
+            --hp-color: #e02b2b;
+            --bg-dark: #05070a;
+        }
+
+        * {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0; padding: 0; box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: var(--ui-color);
+        }
+
+        #game-container {
+            position: relative;
+            border: 4px solid #222;
+            background: var(--bg-dark);
+            width: 100%;
+            max-width: 600px;
+            height: 85vh;
+        }
+
+        #game-container::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+        }
+
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            padding: 0 20px;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        @media (pointer: coarse) {
+            #mobile-controls { display: flex; }
+        }
+
+        .btn {
+            width: 70px;
+            height: 70px;
+            background: rgba(141, 189, 12, 0.2);
+            border: 3px solid var(--ui-color);
+            border-radius: 10px;
+            color: var(--ui-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        .shoot-btn {
+            width: 90px;
+            height: 90px;
+            background: rgba(224, 43, 43, 0.3);
+            border-color: #e02b2b;
+        }
+
+        #ui {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            font-weight: bold;
+        }
+
+        #overlay {
+            position: absolute;
+            top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        #boss-ui {
+            position: absolute;
+            top: 50px; width: 80%; left: 10%;
+            display: none;
+        }
+        #boss-hp-bar {
+            width: 100%; height: 10px; border: 2px solid #fff;
+        }
+        #boss-hp-inner {
+            width: 100%; height: 100%; background: #e02b2b;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div>LVL: <span id="lvl">1</span></div>
+        <div>HP: <span id="hp">3</span></div>
+        <div>SCORE: <span id="score">0</span></div>
+    </div>
+
+    <div id="game-container">
+        <div id="boss-ui">
+            <div style="font-size: 10px; margin-bottom: 4px;">BOSS: VOID BEAST</div>
+            <div id="boss-hp-bar"><div id="boss-hp-inner"></div></div>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="overlay">
+            <h1 id="status">GAME OVER</h1>
+            <button onclick="resetGame()" style="margin-top:20px; padding: 10px 20px; background:var(--ui-color); border:none; font-weight:bold;">RE-DEPLOY</button>
+        </div>
+
+        <div id="mobile-controls">
+            <div style="display: flex; gap: 10px;">
+                <div class="btn" id="leftBtn">L</div>
+                <div class="btn" id="rightBtn">R</div>
+            </div>
+            <div class="btn shoot-btn" id="shootBtn">FIRE</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score"), hpEl = document.getElementById("hp"), lvlEl = document.getElementById("lvl");
+        const overlay = document.getElementById("overlay"), bossUi = document.getElementById("boss-ui"), bossHpInner = document.getElementById("boss-hp-inner");
+
+        const width = 400, height = 600;
+        let player, bullets, enemies, items, particles, stars;
+        let score = 0, hp = 3, level = 1, kills = 0, gameActive = false;
+        let keys = {}, boss = null, shake = 0, frame = 0;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(f, t, d, v=0.05) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+            g.gain.setValueAtTime(v, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        function init() {
+            canvas.width = width; canvas.height = height;
+            resetGame();
+        }
+
+        function resetGame() {
+            player = { x: width/2 - 15, y: height - 100, w: 30, h: 30 };
+            bullets = []; enemies = []; items = []; particles = []; boss = null;
+            stars = Array(40).fill().map(() => ({ x: Math.random()*width, y: Math.random()*height, s: Math.random()*3 + 1 }));
+            score = 0; hp = 3; level = 1; kills = 0; frame = 0;
+            updateUI();
+            overlay.style.display = "none";
+            bossUi.style.display = "none";
+            gameActive = true;
+            requestAnimationFrame(update);
+        }
+
+        function updateUI() {
+            scoreEl.innerText = score; hpEl.innerText = hp; lvlEl.innerText = level;
+        }
+
+        function spawnEnemy() {
+            if (boss) return;
+            let count = Math.min(3, 1 + Math.floor(level / 3));
+            for(let i=0; i<count; i++) {
+                enemies.push({ 
+                    x: Math.random()*(width-40), y: -50, w: 40, h: 30, 
+                    hp: level, type: 'normal', 
+                    vx: (Math.random()-0.5) * level 
+                });
+            }
+        }
+
+        function triggerMegaBomb() {
+            shake = 30;
+            playSfx(100, 'sawtooth', 1, 0.3);
+            enemies.forEach(e => {
+                if(e.type === 'boss') e.hp -= 20;
+                else {
+                    createExplosion(e.x, e.y, "#ffbe0b");
+                    score += 50;
+                }
+            });
+            enemies = enemies.filter(e => e.type === 'boss');
+            updateUI();
+        }
+
+        function createExplosion(x, y, color="#e02b2b") {
+            for(let i=0; i<15; i++) {
+                particles.push({ x, y, vx: (Math.random()-0.5)*12, vy: (Math.random()-0.5)*12, l: 25, c: color });
+            }
+            shake = 8;
+            playSfx(150, 'sawtooth', 0.2, 0.1);
+        }
+
+        function update() {
+            if (!gameActive) return;
+            frame++;
+            if (shake > 0) shake--;
+
+            // Move Player
+            if (keys['ArrowLeft'] || keys['a'] || keys['left']) player.x -= 6;
+            if (keys['ArrowRight'] || keys['d'] || keys['right']) player.x += 6;
+            player.x = Math.max(0, Math.min(width - player.w, player.x));
+
+            // Shooting
+            if (frame % 12 === 0 && (keys[' '] || keys['f'] || keys['shoot'])) {
+                bullets.push({ x: player.x + 12, y: player.y, w: 6, h: 12 });
+                playSfx(500, 'square', 0.05, 0.02);
+            }
+
+            // Stars
+            stars.forEach(s => {
+                s.y += s.s + level;
+                if (s.y > height) { s.y = 0; s.x = Math.random()*width; }
+            });
+
+            // Leveling & Boss
+            if (kills >= 5) {
+                kills = 0; level++;
+                updateUI();
+                if (level % 5 === 0) {
+                    boss = { x: width/2 - 60, y: -100, w: 120, h: 80, hp: 50 * (level/5), maxHp: 50 * (level/5), type: 'boss' };
+                    enemies.push(boss);
+                    bossUi.style.display = "block";
+                    playSfx(80, 'sawtooth', 1, 0.2);
+                }
+            }
+
+            if (frame % (Math.max(20, 80 - level*5)) === 0) spawnEnemy();
+
+            // Items
+            if (frame % 500 === 0) items.push({ x: Math.random()*width, y: -20, type: Math.random() > 0.7 ? 'bomb' : 'hp' });
+
+            // Logic loops
+            bullets.forEach((b, i) => {
+                b.y -= 10;
+                if (b.y < 0) bullets.splice(i, 1);
+            });
+
+            enemies.forEach((e, ei) => {
+                if (e.type === 'boss') {
+                    if (e.y < 50) e.y += 1;
+                    e.x += Math.sin(frame * 0.05) * 2;
+                    bossHpInner.style.width = (e.hp / e.maxHp * 100) + "%";
+                } else {
+                    e.y += 2 + level*0.2;
+                    e.x += e.vx * 0.5;
+                }
+
+                // Bullet hit enemy
+                bullets.forEach((b, bi) => {
+                    if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
+                        e.hp--;
+                        bullets.splice(bi, 1);
+                        if (e.hp <= 0) {
+                            createExplosion(e.x + e.w/2, e.y + e.h/2, e.type === 'boss' ? '#8338ec' : '#e02b2b');
+                            if(e.type === 'boss') { boss = null; bossUi.style.display = "none"; score += 500; }
+                            else { kills++; score += 20; }
+                            enemies.splice(ei, 1);
+                            updateUI();
+                        }
+                    }
+                });
+
+                // Enemy hit player
+                if (player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+                    hp--; updateUI();
+                    createExplosion(player.x, player.y, "#fff");
+                    enemies.splice(ei, 1);
+                    if (hp <= 0) gameOver();
+                }
+                if (e.y > height) enemies.splice(ei, 1);
+            });
+
+            items.forEach((it, i) => {
+                it.y += 3;
+                if (player.x < it.x + 20 && player.x + player.w > it.x && player.y < it.y + 20 && player.y + player.h > it.y) {
+                    if (it.type === 'bomb') triggerMegaBomb();
+                    else { hp = Math.min(5, hp+1); updateUI(); playSfx(800, 'square', 0.1); }
+                    items.splice(i, 1);
+                }
+            });
+
+            particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.l--; if(p.l<=0) particles.splice(i,1); });
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function drawMonster(e) {
+            ctx.fillStyle = e.type === 'boss' ? "#8338ec" : "#e02b2b";
+            ctx.fillRect(e.x, e.y, e.w, e.h);
+            ctx.fillStyle = "#fff";
+            const eyeSize = e.type === 'boss' ? 15 : 6;
+            ctx.fillRect(e.x + 5, e.y + 5, eyeSize, eyeSize);
+            ctx.fillRect(e.x + e.w - eyeSize - 5, e.y + 5, eyeSize, eyeSize);
+            // Mouth
+            ctx.fillStyle = "#000";
+            ctx.fillRect(e.x + 10, e.y + e.h - 10, e.w - 20, 5);
+        }
+
+        function draw() {
+            ctx.save();
+            if (shake > 0) ctx.translate(Math.random()*shake-shake/2, Math.random()*shake-shake/2);
+            ctx.fillStyle = "#05070a"; ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = "#fff"; stars.forEach(s => ctx.fillRect(s.x, s.y, 2, 2));
+
+            bullets.forEach(b => { ctx.fillStyle = "#ffbe0b"; ctx.fillRect(b.x, b.y, b.w, b.h); });
+
+            enemies.forEach(e => drawMonster(e));
+
+            items.forEach(it => {
+                ctx.fillStyle = it.type === 'bomb' ? "#ffbe0b" : "#4ade80";
+                ctx.fillRect(it.x, it.y, 20, 20);
+                ctx.fillStyle = "#000";
+                ctx.font = "bold 12px Courier";
+                ctx.fillText(it.type === 'bomb' ? "B" : "H", it.x+6, it.y+15);
+            });
+
+            particles.forEach(p => { ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 4, 4); });
+
+            // Player Ship
+            ctx.fillStyle = "#4ade80";
+            ctx.fillRect(player.x + 10, player.y, 10, 30);
+            ctx.fillRect(player.x, player.y + 15, 30, 10);
+
+            ctx.restore();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            playSfx(50, 'sawtooth', 0.8, 0.2);
+            overlay.style.display = "flex";
+        }
+
+        // Controls
+        window.addEventListener("keydown", e => keys[e.key] = true);
+        window.addEventListener("keyup", e => keys[e.key] = false);
+
+        const bindBtn = (id, key) => {
+            const el = document.getElementById(id);
+            el.addEventListener("touchstart", (e) => { e.preventDefault(); keys[key] = true; });
+            el.addEventListener("touchend", (e) => { e.preventDefault(); keys[key] = false; });
+        };
+        bindBtn("leftBtn", "left"); bindBtn("rightBtn", "right"); bindBtn("shootBtn", "shoot");
+
+        init();
+    </script>
+</body>
+</html>

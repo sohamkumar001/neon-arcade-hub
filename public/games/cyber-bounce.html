@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cyber-Bounce</title>
+    <style>
+        :root {
+            --neon-gold: #ffcc00;
+            --neon-red: #ff0044;
+            --bg-dark: #0a0a0a;
+        }
+
+        * { touch-action: none; user-select: none; margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: #000;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; font-family: 'Courier New', monospace;
+            overflow: hidden; color: var(--neon-gold);
+        }
+
+        #game-wrapper {
+            position: relative;
+            width: 350px; height: 500px;
+            background: var(--bg-dark);
+            border: 3px solid #222;
+            overflow: hidden;
+        }
+
+        canvas { display: block; image-rendering: pixelated; }
+
+        #ui {
+            position: absolute;
+            top: 15px; width: 100%;
+            text-align: center; font-size: 24px; font-weight: bold;
+            z-index: 10; pointer-events: none;
+        }
+
+        #overlay {
+            display: none; position: absolute; inset: 0;
+            background: rgba(0,0,0,0.85);
+            flex-direction: column; align-items: center; justify-content: center;
+            z-index: 20;
+        }
+
+        .restart-btn {
+            margin-top: 20px; padding: 12px 24px;
+            background: var(--neon-gold); border: none;
+            font-weight: bold; cursor: pointer; color: #000;
+        }
+    </style>
+</head>
+<body onclick="handleInput()" onkeydown="if(event.code==='Space') handleInput()">
+
+    <div id="game-wrapper">
+        <div id="ui">DATA: <span id="score">0</span></div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 style="color: var(--neon-red)">CORE COLLAPSE</h1>
+            <p id="final-score" style="margin: 10px;"></p>
+            <button class="restart-btn" onclick="resetGame(event)">RE-BOOT</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const overlay = document.getElementById("overlay");
+
+        canvas.width = 350; canvas.height = 500;
+
+        let gameActive = false;
+        let score = 0, frame = 0;
+        let player = { x: 50, y: 250, r: 8, vy: 0 };
+        let gravity = 0.25, jump = -5.5;
+        let gates = [];
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(f, d, t='sine') {
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.value = f;
+            g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        function resetGame(e) {
+            if(e) e.stopPropagation();
+            score = 0; frame = 0;
+            player = { x: 80, y: 250, r: 8, vy: 0 };
+            gates = [];
+            gameActive = true;
+            overlay.style.display = "none";
+            scoreEl.innerText = score;
+            update();
+        }
+
+        function handleInput() {
+            if (!gameActive) return;
+            player.vy = jump;
+            playSfx(600, 0.1);
+        }
+
+        function update() {
+            if (!gameActive) return;
+            frame++;
+
+            // Physics
+            player.vy += gravity;
+            player.y += player.vy;
+
+            // Bounds Check
+            if (player.y + player.r > canvas.height || player.y - player.r < 0) {
+                gameOver();
+            }
+
+            // Spawn Gates
+            if (frame % 90 === 0) {
+                let gapHeight = Math.max(100, 160 - score * 2);
+                let gapY = Math.random() * (canvas.height - gapHeight - 100) + 50;
+                gates.push({ x: canvas.width, y: gapY, w: 40, gap: gapHeight, passed: false });
+            }
+
+            // Move Gates
+            for (let i = gates.length - 1; i >= 0; i--) {
+                let g = gates[i];
+                g.x -= 2.5 + (score * 0.05); // Speed up slowly
+
+                // Collision Detection
+                if (player.x + player.r > g.x && player.x - player.r < g.x + g.w) {
+                    if (player.y - player.r < g.y || player.y + player.r > g.y + g.gap) {
+                        gameOver();
+                    }
+                }
+
+                // Scoring
+                if (!g.passed && g.x + g.w < player.x) {
+                    g.passed = true;
+                    score++;
+                    scoreEl.innerText = score;
+                    playSfx(800 + (score * 10), 0.1, 'triangle');
+                }
+
+                if (g.x + g.w < 0) gates.splice(i, 1);
+            }
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.fillStyle = "#0a0a0a";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Scanlines
+            ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+            for(let i=0; i<canvas.height; i+=4) ctx.fillRect(0, i, canvas.width, 1);
+
+            // Draw Gates
+            ctx.fillStyle = varColor('--neon-red');
+            gates.forEach(g => {
+                // Top part
+                ctx.fillRect(g.x, 0, g.w, g.y);
+                // Bottom part
+                ctx.fillRect(g.x, g.y + g.gap, g.w, canvas.height);
+                // Glow effect on edge
+                ctx.shadowBlur = 10; ctx.shadowColor = varColor('--neon-red');
+                ctx.fillRect(g.x - 2, g.y - 2, g.w + 4, 4);
+                ctx.fillRect(g.x - 2, g.y + g.gap - 2, g.w + 4, 4);
+                ctx.shadowBlur = 0;
+            });
+
+            // Draw Player
+            ctx.fillStyle = varColor('--neon-gold');
+            ctx.shadowBlur = 15; ctx.shadowColor = varColor('--neon-gold');
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            // Player "Eye"
+            ctx.fillStyle = "#000";
+            ctx.fillRect(player.x + 2, player.y - 3, 3, 3);
+        }
+
+        function varColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name); }
+
+        function gameOver() {
+            gameActive = false;
+            playSfx(100, 0.4, 'sawtooth');
+            document.getElementById("final-score").innerText = "GATES CLEARED: " + score;
+            overlay.style.display = "flex";
+        }
+
+        resetGame();
+    </script>
+</body>
+</html>

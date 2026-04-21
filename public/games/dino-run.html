@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>16-Bit Seasons Dino</title>
+    <style>
+        :root {
+            --ui-color: #8dbd0c;
+            --bg-sunny: #0d1101;
+            --bg-rainy: #05070a;
+            --bg-cold: #0a121a;
+        }
+
+        * {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0; padding: 0; box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: var(--ui-color);
+        }
+
+        #game-wrapper {
+            position: relative;
+            border: 6px solid #222;
+            background: var(--bg-sunny);
+            overflow: hidden;
+            transition: background 1s ease;
+        }
+
+        #game-wrapper::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.15) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        #overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        #ui {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 15px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        button {
+            margin-top: 15px;
+            padding: 12px 24px;
+            background: var(--ui-color);
+            border: none;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px #444;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="weather-text">SUNNY</div>
+        <div>HI: <span id="high">0000</span> SC: <span id="score">0000</span></div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 id="status">EXTINCT</h1>
+            <button onclick="event.stopPropagation(); resetGame()">REVOLVE</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const highEl = document.getElementById("high");
+        const weatherEl = document.getElementById("weather-text");
+        const overlay = document.getElementById("overlay");
+
+        const width = 600;
+        const height = 220;
+        const gravity = 0.75;
+        
+        let dino, obstacles, weatherParticles;
+        let gameActive = false;
+        let score = 0;
+        let highscore = localStorage.getItem("dino-hi-v2") || 0;
+        let speed = 6.5;
+        let frame = 0;
+        let weather = "SUNNY";
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(f, t, d) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        function init() {
+            canvas.width = width;
+            canvas.height = height;
+            highEl.innerText = highscore.toString().padStart(4, '0');
+            resetGame();
+        }
+
+        function resetGame() {
+            dino = { x: 60, y: height - 50, w: 24, h: 36, dy: 0, grounded: true };
+            obstacles = [];
+            weatherParticles = [];
+            score = 0;
+            speed = 6.5;
+            frame = 0;
+            weather = "SUNNY";
+            weatherEl.innerText = "SUNNY";
+            canvas.parentElement.style.background = "var(--bg-sunny)";
+            overlay.style.display = "none";
+            
+            // Ensure loop isn't already running before starting
+            if (!gameActive) {
+                gameActive = true;
+                requestAnimationFrame(update);
+            }
+        }
+
+        function drawCactus(x, y, w, h) {
+            ctx.fillStyle = weather === "COLD" ? "#a8dadc" : "#5a7a06";
+            ctx.fillRect(x + w*0.3, y, w*0.4, h);
+            ctx.fillRect(x, y + h*0.3, w*0.3, h*0.2);
+            ctx.fillRect(x, y + h*0.1, w*0.1, h*0.2);
+            ctx.fillRect(x + w*0.7, y + h*0.4, w*0.3, h*0.2);
+            ctx.fillRect(x + w*0.9, y + h*0.2, w*0.1, h*0.2);
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            frame++;
+            score += 0.15;
+            scoreEl.innerText = Math.floor(score).toString().padStart(4, '0');
+
+            // Weather System Logic
+            const currentScore = Math.floor(score);
+            if (currentScore > 300 && currentScore < 700 && weather !== "RAINY") {
+                weather = "RAINY";
+                weatherEl.innerText = "RAINY";
+                canvas.parentElement.style.background = "var(--bg-rainy)";
+            } else if (currentScore >= 700 && weather !== "COLD") {
+                weather = "COLD";
+                weatherEl.innerText = "COLD";
+                canvas.parentElement.style.background = "var(--bg-cold)";
+            }
+
+            // Dino Physics
+            dino.dy += gravity;
+            dino.y += dino.dy;
+            if (dino.y > height - 50) {
+                dino.y = height - 50;
+                dino.dy = 0;
+                dino.grounded = true;
+            }
+
+            // Spawning Logic
+            if (frame % Math.floor(70 / (speed/7)) === 0) {
+                const isBird = (score > 500 && Math.random() > 0.8);
+                if (isBird) {
+                    obstacles.push({ x: width + 50, y: height - 100, w: 25, h: 15, type: "BIRD" });
+                } else {
+                    const clusterSize = Math.floor(Math.random() * 3) + 1;
+                    for(let i=0; i < clusterSize; i++) {
+                        obstacles.push({
+                            x: width + 50 + (i * 20),
+                            y: height - 50,
+                            w: 18,
+                            h: 30 + Math.random() * 10,
+                            type: "CACTUS"
+                        });
+                    }
+                }
+            }
+
+            if (weather === "RAINY") {
+                weatherParticles.push({ x: Math.random() * width, y: 0, vx: -4, vy: 12, type: 'RAIN' });
+            } else if (weather === "COLD" && frame % 2 === 0) {
+                weatherParticles.push({ x: Math.random() * width, y: 0, vx: -1, vy: 2, type: 'SNOW' });
+            }
+
+            // Move & Collision
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let o = obstacles[i];
+                o.x -= speed;
+                
+                // Simple AABB Collision
+                if (dino.x + 5 < o.x + o.w && dino.x + dino.w - 5 > o.x && 
+                    dino.y + 5 < o.y + o.h && dino.y + dino.h - 5 > o.y) {
+                    gameOver();
+                }
+                if (o.x < -100) obstacles.splice(i, 1);
+            }
+
+            for (let i = weatherParticles.length - 1; i >= 0; i--) {
+                let p = weatherParticles[i];
+                p.x += p.vx; p.y += p.vy;
+                if (p.y > height) weatherParticles.splice(i, 1);
+            }
+
+            speed += 0.0005;
+            draw();
+            
+            // Only request next frame if game is still active
+            if (gameActive) {
+                requestAnimationFrame(update);
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Ground
+            ctx.fillStyle = weather === "COLD" ? "#457b9d" : "#333";
+            ctx.fillRect(0, height - 15, width, 2);
+
+            // Weather
+            weatherParticles.forEach(p => {
+                ctx.fillStyle = p.type === 'RAIN' ? "#4ade80" : "#fff";
+                ctx.fillRect(p.x, p.y, p.type === 'RAIN' ? 1 : 3, p.type === 'RAIN' ? 8 : 3);
+            });
+
+            // Obstacles
+            obstacles.forEach(o => {
+                if (o.type === "CACTUS") drawCactus(o.x, o.y, o.w, o.h);
+                else {
+                    ctx.fillStyle = "#e02b2b";
+                    ctx.fillRect(o.x, o.y + (Math.sin(frame*0.2)*10), o.w, o.h);
+                }
+            });
+
+            // Dino
+            ctx.save();
+            ctx.translate(dino.x, dino.y);
+            if (!dino.grounded) {
+                ctx.scale(0.9, 1.1);
+            } else {
+                ctx.translate(0, Math.sin(frame*0.3)*2);
+            }
+            ctx.fillStyle = "#8dbd0c";
+            ctx.fillRect(-dino.w/2, -dino.h, dino.w, dino.h);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(2, -dino.h + 6, 4, 4);
+            ctx.restore();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            playSound(100, 'sawtooth', 0.5);
+            if (score > highscore) {
+                highscore = Math.floor(score);
+                localStorage.setItem("dino-hi-v2", highscore);
+                highEl.innerText = highscore.toString().padStart(4, '0');
+            }
+            overlay.style.display = "flex";
+        }
+
+        function handleInput() {
+            if (!gameActive) return;
+            if (dino.grounded) {
+                dino.dy = -14;
+                dino.grounded = false;
+                playSound(400, 'square', 0.1);
+            }
+        }
+
+        window.addEventListener("keydown", e => { if (e.code === "Space" || e.key === "w") handleInput(); });
+        window.addEventListener("touchstart", e => { 
+            if(gameActive) {
+                handleInput(); 
+                e.preventDefault(); 
+            }
+        }, {passive: false});
+        
+        canvas.addEventListener("mousedown", handleInput);
+
+        init();
+    </script>
+</body>
+</html>

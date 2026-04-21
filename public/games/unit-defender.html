@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hex-Deflect // Guardian</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        :root { --core: #00ffcc; --shield: #ffffff; --enemy: #ff0044; --bg: #0a0a0f; }
+        * { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+    touch-action: none; 
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+        body { background: #000; color: white; font-family: 'VT323', monospace; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { image-rendering: pixelated; background: var(--bg); box-shadow: 0 0 50px rgba(0,0,0,0.5); border: 2px solid #222; }
+        #ui { position: absolute; top: 20px; text-align: center; pointer-events: none; width: 100%; z-index: 5; }
+        #score { font-size: 4rem; color: var(--core); text-shadow: 2px 2px 0px #000; }
+        #menu { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .title { font-size: 4.5rem; color: var(--shield); margin-bottom: 5px; letter-spacing: 4px; }
+        button { background: #000; border: 4px solid var(--core); color: var(--core); padding: 10px 40px; font-size: 2.2rem; cursor: pointer; font-family: 'VT323', monospace; transition: 0.1s; }
+        button:hover { background: var(--core); color: #000; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="score">00</div>
+    </div>
+
+    <div id="menu">
+        <div class="title">UNIT_DEFENDER</div>
+        <p id="last-score" style="margin-bottom: 30px; font-size: 1.8rem; color: var(--enemy); height: 2rem;"></p>
+        <button onclick="start()">BOOT_SYSTEM</button>
+    </div>
+
+    <canvas id="c"></canvas>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const menu = document.getElementById('menu');
+    const lastScoreEl = document.getElementById('last-score');
+
+    const V_SIZE = 400;
+    let score = 0, gameActive = false, shieldAngle = 0, shieldDist = 80;
+    let enemies = [], particles = [], lastSpawn = 0, spawnRate = 1200;
+
+    function init() {
+        const displaySize = Math.min(window.innerWidth, window.innerHeight) - 20;
+        canvas.style.width = canvas.style.height = displaySize + 'px';
+        canvas.width = canvas.height = V_SIZE;
+        ctx.imageSmoothingEnabled = false;
+    }
+
+    const updateInput = (e) => {
+        if (!gameActive) return;
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        
+        const x = (clientX - rect.left) / (rect.width / V_SIZE) - V_SIZE/2;
+        const y = (clientY - rect.top) / (rect.height / V_SIZE) - V_SIZE/2;
+        
+        shieldAngle = Math.atan2(y, x);
+        const inputDist = Math.sqrt(x*x + y*y);
+        shieldDist = Math.max(40, Math.min(160, inputDist));
+    };
+
+    window.addEventListener('mousemove', updateInput);
+    window.addEventListener('touchmove', updateInput);
+
+    function drawCharacter(time, isWarning) {
+        ctx.save();
+        ctx.translate(V_SIZE/2, V_SIZE/2);
+        const bob = Math.sin(time/200) * 2;
+        
+        // Body
+        ctx.fillStyle = "#444";
+        ctx.fillRect(-12, -10 + bob, 24, 20);
+        ctx.fillStyle = "#666";
+        ctx.fillRect(-10, -8 + bob, 20, 16);
+        
+        // Head
+        ctx.fillStyle = "#222";
+        ctx.fillRect(-8, -18 + bob, 16, 12);
+        
+        const eyeColor = isWarning ? "#ff0044" : "#00ffcc";
+        const blink = Math.sin(time/1000) > 0.95 ? 1 : 4;
+        ctx.fillStyle = eyeColor;
+        ctx.fillRect(-5, -14 + bob, 3, blink); 
+        ctx.fillRect(2, -14 + bob, 3, blink);
+
+        // Antenna
+        ctx.strokeStyle = "#444";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(0, -18+bob); ctx.lineTo(0, -25+bob); ctx.stroke();
+        ctx.fillStyle = eyeColor;
+        ctx.fillRect(-2, -28+bob, 4, 4);
+        ctx.restore();
+    }
+
+    function spawnEnemy() {
+        const angle = Math.random() * Math.PI * 2;
+        enemies.push({
+            x: V_SIZE/2 + Math.cos(angle) * 250,
+            y: V_SIZE/2 + Math.sin(angle) * 250,
+            speed: 1.4 + (score / 20),
+            angle: angle + Math.PI
+        });
+    }
+
+    function start() {
+        score = 0; enemies = []; particles = []; gameActive = true;
+        menu.style.display = 'none';
+        requestAnimationFrame(loop);
+    }
+
+    function loop(time) {
+        if (!gameActive) return;
+
+        if (time - lastSpawn > spawnRate) {
+            spawnEnemy();
+            lastSpawn = time;
+            spawnRate = Math.max(350, 1200 - (score * 10));
+        }
+
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, V_SIZE, V_SIZE);
+
+        // Scanlines
+        ctx.fillStyle = "rgba(255,255,255,0.03)";
+        for(let i=0; i<V_SIZE; i+=4) ctx.fillRect(0, i, V_SIZE, 1);
+
+        // Shield logic
+        const shieldWidth = 1.8 - (shieldDist / 150); 
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = Math.max(4, 12 - (shieldDist/20));
+        ctx.beginPath();
+        ctx.arc(V_SIZE/2, V_SIZE/2, shieldDist, shieldAngle - shieldWidth/2, shieldAngle + shieldWidth/2);
+        ctx.stroke();
+
+        let danger = false;
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i];
+            e.x += Math.cos(e.angle) * e.speed;
+            e.y += Math.sin(e.angle) * e.speed;
+
+            ctx.fillStyle = '#ff0044';
+            ctx.fillRect(e.x - 3, e.y - 3, 6, 6);
+
+            const dx = e.x - V_SIZE/2;
+            const dy = e.y - V_SIZE/2;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 60) danger = true;
+
+            if (dist < shieldDist + 6 && dist > shieldDist - 6) {
+                let a = Math.atan2(dy, dx);
+                let diff = Math.abs(a - shieldAngle);
+                if (diff > Math.PI) diff = Math.PI * 2 - diff;
+
+                if (diff < shieldWidth / 2) {
+                    for(let j=0; j<5; j++) particles.push({x:e.x, y:e.y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:1});
+                    enemies.splice(i, 1);
+                    score++;
+                    scoreEl.innerText = score < 10 ? '0'+score : score;
+                    continue;
+                }
+            }
+            if (dist < 15) gameOver();
+        }
+
+        drawCharacter(time, danger);
+
+        ctx.fillStyle = "#fff";
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+            ctx.globalAlpha = p.life;
+            ctx.fillRect(p.x, p.y, 3, 3);
+            if(p.life <= 0) particles.splice(i, 1);
+        }
+        ctx.globalAlpha = 1;
+        requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+        gameActive = false;
+        menu.style.display = 'flex';
+        lastScoreEl.innerText = `REBOOT REQUIRED // SCORE: ${score}`;
+    }
+
+    window.addEventListener('resize', init);
+    init();
+</script>
+</body>
+</html>

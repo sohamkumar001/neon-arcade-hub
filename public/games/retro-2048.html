@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>16-Bit Retro 2048</title>
+    <style>
+        :root {
+            --bg-color: #0d1101;
+            --ui-color: #8dbd0c;
+            --grid-bg: #1a1f05;
+        }
+
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+    touch-action: none; 
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: var(--ui-color);
+        }
+
+        #ui-top {
+            width: 100%;
+            max-width: 340px;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        #game-wrapper {
+            position: relative;
+            border: 8px solid #222;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(141, 189, 12, 0.2);
+        }
+
+        #game-wrapper::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+            background-size: 100% 3px, 3px 100%;
+            pointer-events: none;
+        }
+
+        canvas {
+            display: block;
+            background-color: var(--bg-color);
+            image-rendering: pixelated;
+        }
+
+        #overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: var(--ui-color);
+            border: none;
+            color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px #444;
+        }
+
+        .controls-hint {
+            margin-top: 15px;
+            font-size: 0.7rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-top">
+        <div>SCORE: <span id="score">0000</span></div>
+        <div>BEST: <span id="best">0000</span></div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 id="status">GAME OVER</h1>
+            <button onclick="resetGame()">RESTART</button>
+        </div>
+    </div>
+
+    <div class="controls-hint">WASD / ARROWS / SWIPE</div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const bestEl = document.getElementById("best");
+        const overlay = document.getElementById("overlay");
+
+        const size = 320;
+        const rows = 4;
+        const cell = size / rows;
+        let board = [];
+        let score = 0;
+        let best = localStorage.getItem("2048-best") || 0;
+
+        // Colors for retro numbers
+        const colors = {
+            2: "#5a7a06", 4: "#8dbd0c", 8: "#a8dadc", 16: "#457b9d",
+            32: "#f4a261", 64: "#e76f51", 128: "#e63946", 256: "#d62828",
+            512: "#ff006e", 1024: "#8338ec", 2048: "#ffbe0b"
+        };
+
+        // --- AUDIO ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(freq, type, dur) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+        }
+
+        function init() {
+            canvas.width = size;
+            canvas.height = size;
+            bestEl.innerText = best.toString().padStart(4, '0');
+            resetGame();
+        }
+
+        function resetGame() {
+            board = Array(rows * rows).fill(0);
+            score = 0;
+            scoreEl.innerText = "0000";
+            overlay.style.display = "none";
+            addTile();
+            addTile();
+            draw();
+        }
+
+        function addTile() {
+            let empty = board.map((v, i) => v === 0 ? i : null).filter(v => v !== null);
+            if (empty.length) {
+                board[empty[Math.floor(Math.random() * empty.length)]] = Math.random() < 0.9 ? 2 : 4;
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = "#0d1101";
+            ctx.fillRect(0, 0, size, size);
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < rows; c++) {
+                    let val = board[r * rows + c];
+                    let x = c * cell;
+                    let y = r * cell;
+
+                    // Draw Cell BG
+                    ctx.fillStyle = "#1a1f05";
+                    ctx.fillRect(x + 4, y + 4, cell - 8, cell - 8);
+
+                    if (val !== 0) {
+                        // Draw Tile
+                        ctx.fillStyle = colors[val] || "#ffffff";
+                        ctx.fillRect(x + 4, y + 4, cell - 8, cell - 8);
+                        
+                        // Pixelated Text Shadow
+                        ctx.fillStyle = "rgba(0,0,0,0.5)";
+                        ctx.font = `bold ${val > 100 ? 16 : 20}px 'Courier New'`;
+                        ctx.textAlign = "center";
+                        ctx.fillText(val, x + cell / 2 + 2, y + cell / 2 + 7);
+                        
+                        // Text
+                        ctx.fillStyle = "#000";
+                        ctx.fillText(val, x + cell / 2, y + cell / 2 + 5);
+                    }
+                }
+            }
+        }
+
+        function slide(row) {
+            let arr = row.filter(val => val);
+            let missing = rows - arr.length;
+            let zeros = Array(missing).fill(0);
+            return arr.concat(zeros);
+        }
+
+        function combine(row) {
+            for (let i = 0; i < rows - 1; i++) {
+                if (row[i] !== 0 && row[i] === row[i + 1]) {
+                    row[i] *= 2;
+                    score += row[i];
+                    row[i + 1] = 0;
+                    playSfx(200 + (Math.log2(row[i]) * 100), 'square', 0.1);
+                }
+            }
+            return row;
+        }
+
+        function operate(row) {
+            row = slide(row);
+            row = combine(row);
+            row = slide(row);
+            return row;
+        }
+
+        function move(direction) {
+            let oldBoard = [...board];
+            
+            for (let i = 0; i < rows; i++) {
+                let row = [];
+                for (let j = 0; j < rows; j++) {
+                    if (direction === 'LEFT' || direction === 'RIGHT') row.push(board[i * rows + j]);
+                    else row.push(board[j * rows + i]);
+                }
+
+                if (direction === 'RIGHT' || direction === 'DOWN') row.reverse();
+                row = operate(row);
+                if (direction === 'RIGHT' || direction === 'DOWN') row.reverse();
+
+                for (let j = 0; j < rows; j++) {
+                    if (direction === 'LEFT' || direction === 'RIGHT') board[i * rows + j] = row[j];
+                    else board[j * rows + i] = row[j];
+                }
+            }
+
+            if (JSON.stringify(oldBoard) !== JSON.stringify(board)) {
+                addTile();
+                playSfx(150, 'triangle', 0.05);
+                scoreEl.innerText = score.toString().padStart(4, '0');
+                if (score > best) {
+                    best = score;
+                    localStorage.setItem("2048-best", best);
+                    bestEl.innerText = best.toString().padStart(4, '0');
+                }
+                draw();
+                if (isGameOver()) {
+                    document.getElementById("status").innerText = "GAME OVER";
+                    overlay.style.display = "flex";
+                }
+            }
+        }
+
+        function isGameOver() {
+            if (board.includes(0)) return false;
+            for (let i = 0; i < rows; i++) {
+                for (let j = 0; j < rows; j++) {
+                    let val = board[i * rows + j];
+                    if (j < rows - 1 && val === board[i * rows + j + 1]) return false;
+                    if (i < rows - 1 && val === board[(i + 1) * rows + j]) return false;
+                }
+            }
+            return true;
+        }
+
+        // --- CONTROLS ---
+        window.addEventListener("keydown", e => {
+            if (e.key === "ArrowLeft" || e.key === "a") move("LEFT");
+            if (e.key === "ArrowRight" || e.key === "d") move("RIGHT");
+            if (e.key === "ArrowUp" || e.key === "w") move("UP");
+            if (e.key === "ArrowDown" || e.key === "s") move("DOWN");
+        });
+
+        let tsX, tsY;
+        document.addEventListener('touchstart', e => {
+            tsX = e.touches[0].clientX;
+            tsY = e.touches[0].clientY;
+        });
+
+        document.addEventListener('touchend', e => {
+            let dx = e.changedTouches[0].clientX - tsX;
+            let dy = e.changedTouches[0].clientY - tsY;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (Math.abs(dx) > 30) move(dx > 0 ? "RIGHT" : "LEFT");
+            } else {
+                if (Math.abs(dy) > 30) move(dy > 0 ? "DOWN" : "UP");
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>

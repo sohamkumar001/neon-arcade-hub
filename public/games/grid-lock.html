@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon-Grid Lock 4x4</title>
+    <style>
+        :root { --neon: #00ff88; --danger: #ff0044; --bg: #050508; --grid: #1a1a2e; }
+        * { touch-action: none; user-select: none; margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        
+        #game-box {
+            position: relative; width: 100vw; height: 100vh;
+            max-width: 500px; max-height: 900px;
+            background: var(--bg); border: 2px solid var(--grid); overflow: hidden;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        #ui {
+            position: absolute; top: 20px; width: 100%;
+            display: flex; justify-content: space-around;
+            color: var(--neon); font-size: 1.2rem; font-weight: bold; z-index: 5;
+            text-shadow: 0 0 10px var(--neon); pointer-events: none;
+        }
+        #menu {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.95);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; color: #fff; text-align: center; padding: 20px;
+        }
+        .btn {
+            background: var(--neon); color: #000; border: none;
+            padding: 15px 40px; margin-top: 20px; font-weight: bold;
+            font-family: inherit; cursor: pointer; box-shadow: 0 0 15px var(--neon);
+            border-radius: 5px; font-size: 1.1rem; text-transform: uppercase;
+        }
+        h1 { color: var(--danger); font-size: 2.5rem; margin-bottom: 10px; text-shadow: 0 0 20px var(--danger); }
+        #f-stats { font-size: 1.2rem; color: #fff; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="game-box">
+    <div id="ui">
+        <div>SYNC: <span id="score">0</span></div>
+        <div>LVL: <span id="lvl">1</span></div>
+    </div>
+    <canvas id="c"></canvas>
+    <div id="menu">
+        <h1 id="m-title">GRID LOCK</h1>
+        <p id="f-stats"></p>
+        <button class="btn" onclick="start()">Initiate System</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const lvlEl = document.getElementById('lvl');
+    const menu = document.getElementById('menu');
+    const mTitle = document.getElementById('m-title');
+    const fStats = document.getElementById('f-stats');
+
+    let w, h, score, level, gameActive = false, frame = 0;
+    let gridPos = { x: 1, y: 1 }; 
+    const GRID_SIZE = 4;
+    let lasers = [];
+    let particles = [];
+    let playerAlive = true;
+
+    let touchStart = null;
+    const SWIPE_THRESHOLD = 30;
+
+    window.addEventListener('touchstart', e => { touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY }; });
+    window.addEventListener('touchend', e => {
+        if (!touchStart || !gameActive || !playerAlive) return;
+        const dx = e.changedTouches[0].clientX - touchStart.x;
+        const dy = e.changedTouches[0].clientY - touchStart.y;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            if (Math.abs(dx) > SWIPE_THRESHOLD) move(dx > 0 ? 1 : -1, 0);
+        } else {
+            if (Math.abs(dy) > SWIPE_THRESHOLD) move(0, dy > 0 ? 1 : -1);
+        }
+        touchStart = null;
+    });
+
+    window.addEventListener('keydown', e => {
+        if (!gameActive || !playerAlive) return;
+        if (e.code === 'ArrowUp' || e.code === 'KeyW') move(0, -1);
+        if (e.code === 'ArrowDown' || e.code === 'KeyS') move(0, 1);
+        if (e.code === 'ArrowLeft' || e.code === 'KeyA') move(-1, 0);
+        if (e.code === 'ArrowRight' || e.code === 'KeyD') move(1, 0);
+    });
+
+    function move(x, y) {
+        gridPos.x = Math.max(0, Math.min(GRID_SIZE - 1, gridPos.x + x));
+        gridPos.y = Math.max(0, Math.min(GRID_SIZE - 1, gridPos.y + y));
+    }
+
+    function init() {
+        w = canvas.width = canvas.offsetWidth;
+        h = canvas.height = canvas.offsetHeight;
+    }
+
+    function start() {
+        score = 0; level = 1; lasers = []; particles = []; frame = 0;
+        gridPos = { x: 1, y: 1 };
+        gameActive = true;
+        playerAlive = true;
+        menu.style.display = 'none';
+        scoreEl.innerText = "0";
+        lvlEl.innerText = "1";
+        loop();
+    }
+
+    function createExplosion(x, y) {
+        for (let i = 0; i < 20; i++) {
+            particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10,
+                size: Math.random() * 5 + 2,
+                life: 1.0
+            });
+        }
+    }
+
+    function spawnWave() {
+        const waveSize = Math.min(3, Math.floor(Math.random() * (level > 5 ? 3 : 2)) + 1);
+        for(let i = 0; i < waveSize; i++) {
+            const isHorizontal = Math.random() > 0.5;
+            const index = Math.floor(Math.random() * GRID_SIZE);
+            const warningDuration = Math.max(15, 50 - level * 2);
+            lasers.push({ isHorizontal, index, timer: warningDuration, active: false, life: 12 });
+        }
+    }
+
+    function loop() {
+        if (!gameActive) return;
+        frame++;
+
+        if (playerAlive && frame % Math.max(25, 70 - level * 4) === 0) spawnWave();
+        if (playerAlive && frame % 600 === 0) { level++; lvlEl.innerText = level; }
+
+        ctx.fillStyle = '#050508';
+        ctx.fillRect(0, 0, w, h);
+
+        const cellSize = Math.min(w * 0.8, h * 0.8) / GRID_SIZE;
+        const offsetX = (w - cellSize * GRID_SIZE) / 2;
+        const offsetY = (h - cellSize * GRID_SIZE) / 2;
+
+        // Grid Lines
+        ctx.strokeStyle = '#1a1a2e';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= GRID_SIZE; i++) {
+            ctx.beginPath();
+            ctx.moveTo(offsetX + i * cellSize, offsetY);
+            ctx.lineTo(offsetX + i * cellSize, offsetY + GRID_SIZE * cellSize);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(offsetX, offsetY + i * cellSize);
+            ctx.lineTo(offsetX + GRID_SIZE * cellSize, offsetY + i * cellSize);
+            ctx.stroke();
+        }
+
+        // Laser Logic
+        for (let i = lasers.length - 1; i >= 0; i--) {
+            let l = lasers[i];
+            l.timer--;
+            let beamPos = l.isHorizontal ? offsetY + l.index * cellSize + cellSize / 2 : offsetX + l.index * cellSize + cellSize / 2;
+
+            if (l.timer > 0) {
+                let opacity = (Math.sin(frame * 0.8) * 0.5 + 0.5) * 0.4;
+                ctx.strokeStyle = `rgba(255, 0, 68, ${opacity})`;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+            } else {
+                l.active = true;
+                l.life--;
+                ctx.strokeStyle = '#ff0044';
+                ctx.lineWidth = cellSize * 0.3;
+                ctx.setLineDash([]);
+                ctx.shadowBlur = 15; ctx.shadowColor = '#ff0044';
+                
+                if (playerAlive && ((l.isHorizontal && gridPos.y === l.index) || (!l.isHorizontal && gridPos.x === l.index))) {
+                    const px = offsetX + gridPos.x * cellSize + cellSize / 2;
+                    const py = offsetY + gridPos.y * cellSize + cellSize / 2;
+                    createExplosion(px, py);
+                    playerAlive = false;
+                    setTimeout(showGameOver, 1000);
+                }
+            }
+
+            ctx.beginPath();
+            if (l.isHorizontal) { ctx.moveTo(offsetX, beamPos); ctx.lineTo(offsetX + cellSize * GRID_SIZE, beamPos); }
+            else { ctx.moveTo(beamPos, offsetY); ctx.lineTo(beamPos, offsetY + cellSize * GRID_SIZE); }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.setLineDash([]);
+
+            if (l.active && l.life <= 0) {
+                lasers.splice(i, 1);
+                if(playerAlive) { score += 10; scoreEl.innerText = score; }
+            }
+        }
+
+        // Particle Logic
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 0.02;
+            ctx.fillStyle = `rgba(0, 255, 136, ${p.life})`;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        // Draw Player
+        if (playerAlive) {
+            const pSize = cellSize * 0.5;
+            const px = offsetX + gridPos.x * cellSize + (cellSize - pSize) / 2;
+            const py = offsetY + gridPos.y * cellSize + (cellSize - pSize) / 2;
+            ctx.fillStyle = '#00ff88';
+            ctx.shadowBlur = 20; ctx.shadowColor = '#00ff88';
+            ctx.beginPath();
+            ctx.roundRect(px, py, pSize, pSize, 4);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    function showGameOver() {
+        gameActive = false;
+        mTitle.innerText = "GAME OVER";
+        fStats.innerText = "FINAL SYNC: " + score;
+        menu.style.display = 'flex';
+    }
+
+    window.onload = init;
+    window.onresize = init;
+</script>
+</body>
+</html>

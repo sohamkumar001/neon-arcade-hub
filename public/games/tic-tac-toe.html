@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>16-Bit Retro Tic-Tac-Toe</title>
+    <style>
+        :root {
+            --bg-color: #0d1101;
+            --line-color: #5a7a06;
+            --x-color: #e02b2b;
+            --o-color: #4ade80;
+            --ui-color: #8dbd0c;
+        }
+
+        * {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: var(--ui-color);
+        }
+
+        #game-wrapper {
+            position: relative;
+            border: 8px solid #222;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(141, 189, 12, 0.2);
+        }
+
+        /* CRT Effect Overlay */
+        #game-wrapper::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+            background-size: 100% 3px, 3px 100%;
+            pointer-events: none;
+        }
+
+        canvas {
+            display: block;
+            background-color: var(--bg-color);
+            image-rendering: pixelated;
+            cursor: pointer;
+        }
+
+        #ui-top {
+            width: 100%;
+            max-width: 320px;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #222;
+            border: 2px solid var(--ui-color);
+            color: var(--ui-color);
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        button.active {
+            background: var(--ui-color);
+            color: #000;
+        }
+
+        #msg {
+            margin-top: 15px;
+            height: 20px;
+            font-size: 1.2rem;
+            text-shadow: 2px 2px #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-top">
+        <div id="p1-score">X: 0</div>
+        <div id="p2-score">O: 0</div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="tttCanvas"></canvas>
+    </div>
+
+    <div id="msg">YOUR TURN</div>
+
+    <div class="controls">
+        <button id="btn1P" class="active" onclick="setMode(1)">1 PLAYER</button>
+        <button id="btn2P" onclick="setMode(2)">2 PLAYER</button>
+        <button onclick="resetBoard()">RESET</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("tttCanvas");
+        const ctx = canvas.getContext("2d");
+        const msgEl = document.getElementById("msg");
+        
+        let size = 300;
+        let cellSize = size / 3;
+        let board = ["", "", "", "", "", "", "", "", ""];
+        let currentPlayer = "X";
+        let isPvE = true;
+        let gameOver = false;
+        let scores = { X: 0, O: 0 };
+
+        // --- AUDIO ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playNote(freq, type, dur) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+        }
+
+        function init() {
+            canvas.width = size;
+            canvas.height = size;
+            draw();
+        }
+
+        function setMode(m) {
+            isPvE = (m === 1);
+            document.getElementById("btn1P").className = isPvE ? "active" : "";
+            document.getElementById("btn2P").className = !isPvE ? "active" : "";
+            resetBoard();
+            scores = { X: 0, O: 0 };
+            updateScoreUI();
+        }
+
+        function updateScoreUI() {
+            document.getElementById("p1-score").innerText = `X: ${scores.X}`;
+            document.getElementById("p2-score").innerText = `O: ${scores.O}`;
+        }
+
+        function draw() {
+            ctx.fillStyle = "#0d1101";
+            ctx.fillRect(0, 0, size, size);
+
+            // Draw Grid Lines (Pixelated style)
+            ctx.fillStyle = "#5a7a06";
+            // Vertical
+            ctx.fillRect(cellSize - 2, 10, 4, size - 20);
+            ctx.fillRect(cellSize * 2 - 2, 10, 4, size - 20);
+            // Horizontal
+            ctx.fillRect(10, cellSize - 2, size - 20, 4);
+            ctx.fillRect(10, cellSize * 2 - 2, size - 20, 4);
+
+            board.forEach((mark, i) => {
+                const x = (i % 3) * cellSize;
+                const y = Math.floor(i / 3) * cellSize;
+                if (mark === "X") drawX(x, y);
+                if (mark === "O") drawO(x, y);
+            });
+        }
+
+        function drawX(x, y) {
+            ctx.fillStyle = "#e02b2b";
+            const pad = 25;
+            const thickness = 8;
+            // Draw a blocky X
+            for(let i=0; i<cellSize - pad*2; i+=4) {
+                ctx.fillRect(x + pad + i, y + pad + i, thickness, thickness);
+                ctx.fillRect(x + cellSize - pad - i - thickness, y + pad + i, thickness, thickness);
+            }
+        }
+
+        function drawO(x, y) {
+            ctx.fillStyle = "#4ade80";
+            const r = cellSize / 2 - 25;
+            const cx = x + cellSize / 2;
+            const cy = y + cellSize / 2;
+            // Draw a blocky Circle
+            for(let a=0; a<Math.PI*2; a+=0.2) {
+                ctx.fillRect(cx + Math.cos(a)*r - 4, cy + Math.sin(a)*r - 4, 8, 8);
+            }
+        }
+
+        canvas.addEventListener("click", (e) => {
+            if (gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const i = Math.floor(mx / cellSize) + Math.floor(my / cellSize) * 3;
+
+            if (board[i] === "") {
+                makeMove(i);
+                if (!gameOver && isPvE && currentPlayer === "O") {
+                    setTimeout(aiMove, 400);
+                }
+            }
+        });
+
+        function makeMove(i) {
+            board[i] = currentPlayer;
+            playNote(currentPlayer === "X" ? 500 : 700, 'square', 0.1);
+            checkWin();
+            if (!gameOver) {
+                currentPlayer = currentPlayer === "X" ? "O" : "X";
+                msgEl.innerText = isPvE && currentPlayer === "O" ? "CPU THINKING..." : `${currentPlayer}'S TURN`;
+            }
+            draw();
+        }
+
+        function aiMove() {
+            if (gameOver) return;
+            // Basic AI: Wins if possible, else blocks, else random
+            let move = board.findIndex(v => v === ""); // Fallback
+            
+            // Randomly choose an empty spot for "retro" feel
+            const empties = board.map((v, idx) => v === "" ? idx : null).filter(v => v !== null);
+            move = empties[Math.floor(Math.random() * empties.length)];
+            
+            makeMove(move);
+        }
+
+        function checkWin() {
+            const wins = [
+                [0,1,2], [3,4,5], [6,7,8], // Rows
+                [0,3,6], [1,4,7], [2,5,8], // Cols
+                [0,4,8], [2,4,6]           // Diags
+            ];
+
+            for (let combo of wins) {
+                if (board[combo[0]] && board[combo[0]] === board[combo[1]] && board[combo[0]] === board[combo[2]]) {
+                    gameOver = true;
+                    scores[currentPlayer]++;
+                    updateScoreUI();
+                    msgEl.innerText = `${currentPlayer} WINS!`;
+                    playNote(800, 'triangle', 0.5);
+                    return;
+                }
+            }
+
+            if (!board.includes("")) {
+                gameOver = true;
+                msgEl.innerText = "DRAW!";
+                playNote(200, 'sawtooth', 0.3);
+            }
+        }
+
+        function resetBoard() {
+            board = ["", "", "", "", "", "", "", "", ""];
+            currentPlayer = "X";
+            gameOver = false;
+            msgEl.innerText = "YOUR TURN";
+            draw();
+        }
+
+        init();
+    </script>
+</body>
+</html>

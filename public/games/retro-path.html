@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retro Path: Overdrive</title>
+    <style>
+        :root {
+            --bg-color: #0d1101;
+            --ui-color: #8dbd0c;
+            --accent-color: #5a7a06;
+            --player-color: #ffffff;
+        }
+
+        * { touch-action: none; user-select: none; -webkit-user-select: none; margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: #000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; font-family: 'Courier New', Courier, monospace;
+            overflow: hidden; color: var(--ui-color);
+        }
+
+        #ui-top {
+            width: 100%; max-width: 320px;
+            display: flex; justify-content: space-between;
+            padding: 10px; font-weight: bold; letter-spacing: 1px;
+        }
+
+        #game-wrapper {
+            position: relative;
+            border: 8px solid #222;
+            width: 320px; height: 480px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(141, 189, 12, 0.2);
+        }
+
+        /* CRT Scanline Effect */
+        #game-wrapper::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 3px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        canvas { display: block; background-color: var(--bg-color); image-rendering: pixelated; }
+
+        #overlay {
+            display: none; position: absolute; inset: 0;
+            background: rgba(0,0,0,0.9);
+            flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; text-align: center;
+        }
+
+        button {
+            margin-top: 20px; padding: 10px 20px;
+            background: var(--ui-color); border: none;
+            color: #000; font-weight: bold; cursor: pointer;
+            box-shadow: 4px 4px 0px #444; font-family: inherit;
+        }
+
+        .controls-hint { margin-top: 15px; font-size: 0.7rem; opacity: 0.7; }
+    </style>
+</head>
+<body onclick="switchLane()" onkeydown="if(event.code==='Space'||event.code==='ArrowLeft'||event.code==='ArrowRight') switchLane()">
+
+    <div id="ui-top">
+        <div>SYNC: <span id="score">0000</span></div>
+        <div>BEST: <span id="best">0000</span></div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 style="font-size: 1.2rem;">CONNECTION LOST</h1>
+            <button onclick="resetGame(event)">RE-SYNC</button>
+        </div>
+    </div>
+
+    <div class="controls-hint">TAP / SPACE TO SWITCH LANES</div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const bestEl = document.getElementById("best");
+        const overlay = document.getElementById("overlay");
+
+        const W = 320, H = 480;
+        canvas.width = W; canvas.height = H;
+
+        let gameActive = false;
+        let score = 0, best = localStorage.getItem("path-best") || 0;
+        let speed = 7, frame = 0, shake = 0;
+        let currentX = 80, targetX = 80;
+        let obstacles = [], particles = [], trail = [];
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(f, d, t='square', v=0.05) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+            g.gain.setValueAtTime(v, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime + d);
+        }
+
+        function resetGame(e) {
+            if(e) e.stopPropagation();
+            score = 0; speed = 7; frame = 0;
+            currentX = 80; targetX = 80;
+            obstacles = []; particles = []; trail = [];
+            gameActive = true;
+            overlay.style.display = "none";
+            scoreEl.innerText = "0000";
+            bestEl.innerText = best.toString().padStart(4, '0');
+            update();
+        }
+
+        function switchLane() {
+            if (!gameActive) return;
+            targetX = (targetX === 80) ? 240 : 80;
+            playSfx(300, 0.05, 'triangle');
+            
+            // "Quick Moment" burst
+            for(let i=0; i<8; i++) {
+                particles.push({
+                    x: currentX, y: 400, 
+                    vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*5, 
+                    life: 1, color: '#8dbd0c'
+                });
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+            frame++;
+            speed += 0.0015;
+
+            // Lane interpolation
+            let prevX = currentX;
+            currentX += (targetX - currentX) * 0.3;
+
+            // Trail animation (Ghosting)
+            if (frame % 2 === 0) {
+                trail.push({x: currentX, y: 400, alpha: 0.5});
+            }
+            if (trail.length > 5) trail.shift();
+
+            // Obstacle logic
+            let spawnRate = Math.max(20, 50 - Math.floor(score / 2));
+            if (frame % Math.floor(spawnRate) === 0) {
+                obstacles.push({ x: Math.random() > 0.5 ? 80 : 240, y: -40, passed: false });
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let o = obstacles[i];
+                o.y += speed;
+
+                // Pixel-perfect collision
+                if (o.y + 20 > 400 && o.y < 430) {
+                    if (Math.abs(currentX - o.x) < 40) gameOver();
+                }
+
+                if (o.y > H) {
+                    score++;
+                    scoreEl.innerText = score.toString().padStart(4, '0');
+                    if(score > best) {
+                        best = score;
+                        localStorage.setItem("path-best", best);
+                    }
+                    playSfx(600 + (score % 10 * 50), 0.05, 'sine', 0.02);
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+                if(p.life <= 0) particles.splice(i, 1);
+            });
+
+            if (shake > 0) shake *= 0.9;
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.save();
+            if (shake > 1) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+
+            // BG
+            ctx.fillStyle = "#0d1101";
+            ctx.fillRect(0, 0, W, H);
+
+            // Road markings
+            ctx.strokeStyle = "#1a1f05";
+            ctx.setLineDash([20, 20]);
+            ctx.lineDashOffset = -frame * speed;
+            ctx.beginPath();
+            ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Trail
+            trail.forEach((t, i) => {
+                ctx.globalAlpha = (i / trail.length) * 0.3;
+                ctx.fillStyle = "#8dbd0c";
+                ctx.fillRect(t.x - 15, t.y, 30, 30);
+            });
+            ctx.globalAlpha = 1;
+
+            // Obstacles
+            obstacles.forEach(o => {
+                ctx.fillStyle = "#5a7a06";
+                ctx.fillRect(o.x - 30, o.y, 60, 25);
+                ctx.fillStyle = "#8dbd0c";
+                ctx.fillRect(o.x - 30, o.y + 10, 60, 5); // Detail line
+            });
+
+            // Particles
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 4, 4);
+            });
+            ctx.globalAlpha = 1;
+
+            // Player with Squash/Stretch
+            let stretch = Math.abs(targetX - currentX) * 0.1;
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(currentX - 15 - (stretch/2), 400 + (stretch/2), 30 + stretch, 30 - stretch);
+            
+            // Player Eye
+            ctx.fillStyle = "#000";
+            ctx.fillRect(currentX - 5, 410, 10, 5);
+
+            ctx.restore();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            shake = 15;
+            playSfx(100, 0.4, 'sawtooth', 0.15);
+            overlay.style.display = "flex";
+        }
+
+        resetGame();
+    </script>
+</body>
+</html>

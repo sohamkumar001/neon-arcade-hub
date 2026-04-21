@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retro Stack Tower</title>
+    <style>
+        :root {
+            --bg-color: #0d1101;
+            --ui-color: #8dbd0c;
+            --grid-bg: #1a1f05;
+        }
+
+        * {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0; padding: 0; box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            color: var(--ui-color);
+        }
+
+        #ui-top {
+            width: 100%;
+            max-width: 320px;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            font-weight: bold;
+        }
+
+        #game-wrapper {
+            position: relative;
+            border: 8px solid #222;
+            width: 320px;
+            height: 480px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(141, 189, 12, 0.2);
+        }
+
+        /* CRT Scanline Effect */
+        #game-wrapper::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 3px;
+            pointer-events: none;
+        }
+
+        canvas {
+            display: block;
+            background-color: var(--bg-color);
+            image-rendering: pixelated;
+        }
+
+        #overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: var(--ui-color);
+            border: none;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px #444;
+        }
+    </style>
+</head>
+<body onclick="dropBlock()" onkeydown="if(event.code==='Space'||event.code==='ArrowDown') dropBlock()">
+
+    <div id="ui-top">
+        <div>FLOORS: <span id="score">0000</span></div>
+        <div>BEST: <span id="best">0000</span></div>
+    </div>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1>COLLAPSED</h1>
+            <button onclick="resetGame(event)">RESTART</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score");
+        const bestEl = document.getElementById("best");
+        const overlay = document.getElementById("overlay");
+
+        const W = 320, H = 480;
+        canvas.width = W; canvas.height = H;
+
+        let gameActive = false;
+        let score = 0;
+        let best = localStorage.getItem("stack-best") || 0;
+        let cameraY = 0;
+        let currentCameraY = 0; // For smooth camera transition
+        let stack = [];
+        let currentBlock = null;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(freq, type, dur) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + dur);
+        }
+
+        function resetGame(e) {
+            if(e) e.stopPropagation();
+            score = 0;
+            cameraY = 0;
+            currentCameraY = 0;
+            gameActive = true;
+            overlay.style.display = "none";
+            scoreEl.innerText = "0000";
+            bestEl.innerText = best.toString().padStart(4, '0');
+            stack = [{ x: W/2 - 60, y: H - 40, w: 120, h: 30 }];
+            spawnBlock();
+            update();
+        }
+
+        function spawnBlock() {
+            let lastBlock = stack[stack.length - 1];
+            currentBlock = {
+                x: 0,
+                y: lastBlock.y - 140, 
+                w: lastBlock.w,
+                h: 30,
+                speed: 3.5 + (score * 0.15),
+                dir: 1,
+                state: 'swinging'
+            };
+        }
+
+        function dropBlock() {
+            if (!gameActive || currentBlock.state !== 'swinging') return;
+            currentBlock.state = 'falling';
+            playSfx(120, 'square', 0.05);
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            if (currentBlock.state === 'swinging') {
+                currentBlock.x += currentBlock.speed * currentBlock.dir;
+                if (currentBlock.x + currentBlock.w > W || currentBlock.x < 0) {
+                    currentBlock.dir *= -1;
+                }
+            } 
+            else if (currentBlock.state === 'falling') {
+                // High velocity for immediate feel
+                currentBlock.y += 18; 
+
+                let last = stack[stack.length - 1];
+                
+                // Collision Detection
+                if (currentBlock.y + currentBlock.h >= last.y) {
+                    let overlap = Math.min(currentBlock.x + currentBlock.w, last.x + last.w) - Math.max(currentBlock.x, last.x);
+
+                    if (overlap > 0) {
+                        // Snap to perfect Y height
+                        currentBlock.y = last.y - currentBlock.h;
+                        currentBlock.x = Math.max(currentBlock.x, last.x);
+                        currentBlock.w = overlap;
+                        
+                        stack.push({...currentBlock});
+                        score++;
+                        scoreEl.innerText = score.toString().padStart(4, '0');
+                        
+                        if (score > best) {
+                            best = score;
+                            localStorage.setItem("stack-best", best);
+                        }
+
+                        playSfx(200 + (score * 15), 'square', 0.1);
+                        
+                        if (stack.length > 3) cameraY += 30;
+                        spawnBlock();
+                    } else {
+                        gameOver();
+                    }
+                }
+            }
+
+            // Smooth camera lerp
+            currentCameraY += (cameraY - currentCameraY) * 0.1;
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.fillStyle = "#0d1101";
+            ctx.fillRect(0, 0, W, H);
+
+            ctx.save();
+            ctx.translate(0, currentCameraY);
+
+            // Draw stack
+            stack.forEach((b, i) => {
+                ctx.fillStyle = i === 0 ? "#1a1f05" : (i % 2 === 0 ? "#8dbd0c" : "#5a7a06");
+                ctx.fillRect(b.x, b.y, b.w, b.h);
+                // Retro block highlight
+                ctx.fillStyle = "rgba(255,255,255,0.15)";
+                ctx.fillRect(b.x, b.y, b.w, 4);
+            });
+
+            // Draw falling block
+            if (currentBlock) {
+                ctx.fillStyle = "#fff";
+                ctx.fillRect(currentBlock.x, currentBlock.y, currentBlock.w, currentBlock.h);
+            }
+
+            ctx.restore();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            playSfx(80, 'sawtooth', 0.4);
+            overlay.style.display = "flex";
+        }
+
+        resetGame();
+    </script>
+</body>
+</html>
