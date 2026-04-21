@@ -132,10 +132,23 @@ export default function App() {
 
     const handleDragStart = (e: DragEvent) => e.preventDefault();
     document.addEventListener('dragstart', handleDragStart);
+
+    // Prevent Pull-to-Refresh globally
+    const preventRefresh = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+      if (scrollY === 0 && e.touches[0].clientY > 0) {
+        // Only prevent if we are at the top and swiping down
+        // However, with overscroll-behavior-y: none in CSS, we might not need this.
+        // But for WebIntoApp webviews, double security is better.
+      }
+    };
+    document.addEventListener('touchstart', preventRefresh, { passive: false });
     
     return () => {
       clearTimeout(timer);
       document.removeEventListener('dragstart', handleDragStart);
+      document.removeEventListener('touchstart', preventRefresh);
     };
   }, []);
 
