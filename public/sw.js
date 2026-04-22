@@ -19,7 +19,12 @@ const ASSETS_TO_CACHE = [
   'games/cyber-jumper.html',
   'games/galaxy-overlord.html',
   'games/tic-tac-toe.html',
-  'games/snake.html'
+  'games/snake.html',
+  'games/mini-army.html',
+  'games/basketball.html',
+  'games/sudoku.html',
+  'games/gravity-fall.html',
+  'games/brick-breaker'
 ];
 
 // Install event - Cache assets
