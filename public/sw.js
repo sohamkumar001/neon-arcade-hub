@@ -24,7 +24,7 @@ const ASSETS_TO_CACHE = [
   'games/basketball.html',
   'games/sudoku.html',
   'games/gravity-fall.html',
-  'games/brick-breaker'
+  'games/brick-breaker.html'
 ];
 
 // Install event - Cache assets
