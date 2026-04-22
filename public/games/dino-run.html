@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>16-Bit Seasons Dino</title>
+    <title>16-Bit Seasons Dino: Evolution</title>
     <style>
         :root {
             --ui-color: #8dbd0c;
-            --bg-sunny: #0d1101;
-            --bg-rainy: #05070a;
-            --bg-cold: #0a121a;
+            --bg-sunny: #1a2e05;
+            --bg-rainy: #0a0f14;
+            --bg-cold: #131c26;
         }
 
         * {
@@ -20,33 +20,45 @@
         }
 
         body {
-            background-color: #000;
+            background-color: #050505;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
+            width: 100vw;
             font-family: 'Courier New', Courier, monospace;
             overflow: hidden;
             color: var(--ui-color);
         }
 
-        #game-wrapper {
+        #game-container {
             position: relative;
-            border: 6px solid #222;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             background: var(--bg-sunny);
-            overflow: hidden;
-            transition: background 1s ease;
+            transition: background 1.5s ease-in-out;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.5);
         }
 
-        #game-wrapper::after {
-            content: "";
+        #ui {
             position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.15) 50%);
-            background-size: 100% 4px;
-            pointer-events: none;
-            z-index: 5;
+            top: 20px;
+            width: 90%;
+            max-width: 700px;
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 25px;
+            font-weight: bold;
+            font-size: 1.2rem;
+            z-index: 50;
+            background: rgba(0,0,0,0.5);
+            border: 2px solid var(--ui-color);
+            border-radius: 8px;
+            letter-spacing: 2px;
         }
 
         canvas {
@@ -55,50 +67,64 @@
         }
 
         #overlay {
-            display: none;
+            display: none; 
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            z-index: 10;
+            z-index: 100;
         }
 
-        #ui {
-            width: 100%;
-            max-width: 600px;
-            display: flex;
-            justify-content: space-between;
-            padding: 5px 15px;
-            font-weight: bold;
-            text-transform: uppercase;
+        h1 { 
+            font-size: clamp(2rem, 10vw, 4rem); 
+            margin-bottom: 30px; 
+            text-shadow: 0 0 20px var(--ui-color);
         }
 
         button {
-            margin-top: 15px;
-            padding: 12px 24px;
+            padding: 20px 50px;
+            font-size: 1.8rem;
             background: var(--ui-color);
             border: none;
             color: #000;
             font-weight: bold;
             cursor: pointer;
-            box-shadow: 4px 4px 0px #444;
+            box-shadow: 0 6px 0px #3d5205;
+            font-family: inherit;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        button:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0px #3d5205;
+        }
+
+        #game-container::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 5;
         }
     </style>
 </head>
 <body>
 
-    <div id="ui">
-        <div id="weather-text">SUNNY</div>
-        <div>HI: <span id="high">0000</span> SC: <span id="score">0000</span></div>
-    </div>
+    <div id="game-container">
+        <div id="ui">
+            <div id="weather-text">SUNNY</div>
+            <div>HI <span id="high">0000</span> | <span id="score">0000</span></div>
+        </div>
 
-    <div id="game-wrapper">
         <canvas id="gameCanvas"></canvas>
+
         <div id="overlay">
             <h1 id="status">EXTINCT</h1>
-            <button onclick="event.stopPropagation(); resetGame()">REVOLVE</button>
+            <button id="revolveBtn">REVOLVE</button>
         </div>
     </div>
 
@@ -109,214 +135,268 @@
         const highEl = document.getElementById("high");
         const weatherEl = document.getElementById("weather-text");
         const overlay = document.getElementById("overlay");
+        const container = document.getElementById("game-container");
+        const revolveBtn = document.getElementById("revolveBtn");
 
-        const width = 600;
-        const height = 220;
-        const gravity = 0.75;
+        const V_WIDTH = 800;
+        const V_HEIGHT = 400;
         
-        let dino, obstacles, weatherParticles;
+        let dino, obstacles, particles, clouds, mountains;
         let gameActive = false;
         let score = 0;
-        let highscore = localStorage.getItem("dino-hi-v2") || 0;
-        let speed = 6.5;
+        let highscore = localStorage.getItem("dino-hi-v4") || 0;
+        let speed = 7;
         let frame = 0;
         let weather = "SUNNY";
 
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        function playSound(f, t, d) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
-            g.gain.setValueAtTime(0.08, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + d);
-            o.connect(g); g.connect(audioCtx.destination);
-            o.start(); o.stop(audioCtx.currentTime + d);
+        function initEnvironment() {
+            clouds = [];
+            for(let i=0; i<5; i++) {
+                clouds.push({ x: Math.random() * V_WIDTH, y: Math.random() * 100 + 20, s: Math.random() * 0.5 + 0.2, w: 60 });
+            }
+            mountains = [];
+            for(let i=0; i<3; i++) {
+                mountains.push({ x: i * 400, w: 450 });
+            }
         }
 
-        function init() {
-            canvas.width = width;
-            canvas.height = height;
-            highEl.innerText = highscore.toString().padStart(4, '0');
-            resetGame();
+        function resize() {
+            const scale = Math.min(window.innerWidth / V_WIDTH, window.innerHeight / V_HEIGHT);
+            canvas.width = V_WIDTH;
+            canvas.height = V_HEIGHT;
+            canvas.style.width = (V_WIDTH * scale) + "px";
+            canvas.style.height = (V_HEIGHT * scale) + "px";
         }
 
         function resetGame() {
-            dino = { x: 60, y: height - 50, w: 24, h: 36, dy: 0, grounded: true };
+            dino = { x: 80, y: V_HEIGHT - 80, w: 32, h: 48, dy: 0, grounded: true };
             obstacles = [];
-            weatherParticles = [];
+            particles = [];
             score = 0;
-            speed = 6.5;
+            speed = 7;
             frame = 0;
             weather = "SUNNY";
             weatherEl.innerText = "SUNNY";
-            canvas.parentElement.style.background = "var(--bg-sunny)";
+            container.style.background = "var(--bg-sunny)";
             overlay.style.display = "none";
+            initEnvironment();
             
-            // Ensure loop isn't already running before starting
             if (!gameActive) {
                 gameActive = true;
                 requestAnimationFrame(update);
             }
         }
 
-        function drawCactus(x, y, w, h) {
-            ctx.fillStyle = weather === "COLD" ? "#a8dadc" : "#5a7a06";
-            ctx.fillRect(x + w*0.3, y, w*0.4, h);
-            ctx.fillRect(x, y + h*0.3, w*0.3, h*0.2);
-            ctx.fillRect(x, y + h*0.1, w*0.1, h*0.2);
-            ctx.fillRect(x + w*0.7, y + h*0.4, w*0.3, h*0.2);
-            ctx.fillRect(x + w*0.9, y + h*0.2, w*0.1, h*0.2);
+        function spawnDust(x, y) {
+            particles.push({ x, y, vx: -Math.random()*2, vy: -Math.random(), life: 1, type: 'DUST' });
         }
 
         function update() {
             if (!gameActive) return;
 
             frame++;
-            score += 0.15;
+            score += 0.2;
             scoreEl.innerText = Math.floor(score).toString().padStart(4, '0');
 
-            // Weather System Logic
-            const currentScore = Math.floor(score);
-            if (currentScore > 300 && currentScore < 700 && weather !== "RAINY") {
-                weather = "RAINY";
-                weatherEl.innerText = "RAINY";
-                canvas.parentElement.style.background = "var(--bg-rainy)";
-            } else if (currentScore >= 700 && weather !== "COLD") {
-                weather = "COLD";
-                weatherEl.innerText = "COLD";
-                canvas.parentElement.style.background = "var(--bg-cold)";
+            // Seasons logic
+            const s = Math.floor(score);
+            if (s > 400 && s < 900 && weather !== "RAINY") {
+                weather = "RAINY"; weatherEl.innerText = "RAINY";
+                container.style.background = "var(--bg-rainy)";
+            } else if (s >= 900 && weather !== "COLD") {
+                weather = "COLD"; weatherEl.innerText = "COLD";
+                container.style.background = "var(--bg-cold)";
             }
 
             // Dino Physics
-            dino.dy += gravity;
+            dino.dy += 0.8; 
             dino.y += dino.dy;
-            if (dino.y > height - 50) {
-                dino.y = height - 50;
+            if (dino.y > V_HEIGHT - 80) {
+                if(!dino.grounded) spawnDust(dino.x, V_HEIGHT - 35);
+                dino.y = V_HEIGHT - 80;
                 dino.dy = 0;
                 dino.grounded = true;
             }
 
+            if(dino.grounded && frame % 5 === 0) spawnDust(dino.x, V_HEIGHT - 35);
+
+            // Background Parallax
+            clouds.forEach(c => {
+                c.x -= (speed * 0.2) * c.s;
+                if(c.x < -100) c.x = V_WIDTH + 100;
+            });
+            mountains.forEach(m => {
+                m.x -= speed * 0.1;
+                if(m.x < -450) m.x = V_WIDTH;
+            });
+
             // Spawning Logic
-            if (frame % Math.floor(70 / (speed/7)) === 0) {
-                const isBird = (score > 500 && Math.random() > 0.8);
-                if (isBird) {
-                    obstacles.push({ x: width + 50, y: height - 100, w: 25, h: 15, type: "BIRD" });
+            if (frame % Math.max(35, Math.floor(75 - speed)) === 0) {
+                const rand = Math.random();
+                
+                if (rand < 0.15 && score > 150) { 
+                    // Bird (Flyer)
+                    obstacles.push({ x: V_WIDTH + 50, y: V_HEIGHT - 140, w: 34, h: 24, type: 'BIRD', sin: 0 });
+                } else if (rand < 0.25 && score > 400) {
+                    // Falling Asteroid
+                    obstacles.push({ x: V_WIDTH + Math.random()*200, y: -50, w: 25, h: 25, type: 'METEOR', vx: -speed - 3, vy: 5 });
                 } else {
-                    const clusterSize = Math.floor(Math.random() * 3) + 1;
-                    for(let i=0; i < clusterSize; i++) {
-                        obstacles.push({
-                            x: width + 50 + (i * 20),
-                            y: height - 50,
-                            w: 18,
-                            h: 30 + Math.random() * 10,
-                            type: "CACTUS"
-                        });
+                    // Cacti Grouping (1 to 3)
+                    let count = 1;
+                    if (score > 200) count = Math.floor(Math.random() * 3) + 1;
+                    for(let i=0; i<count; i++) {
+                        obstacles.push({ x: V_WIDTH + 50 + (i * 28), y: V_HEIGHT - 85, w: 22, h: 45, type: 'CACTUS' });
                     }
                 }
             }
 
+            // Weather Particles
             if (weather === "RAINY") {
-                weatherParticles.push({ x: Math.random() * width, y: 0, vx: -4, vy: 12, type: 'RAIN' });
+                particles.push({ x: Math.random() * V_WIDTH, y: 0, vx: -4, vy: 12, life: 1, type: 'RAIN' });
             } else if (weather === "COLD" && frame % 2 === 0) {
-                weatherParticles.push({ x: Math.random() * width, y: 0, vx: -1, vy: 2, type: 'SNOW' });
+                particles.push({ x: Math.random() * V_WIDTH, y: 0, vx: -1, vy: 2, life: 1, type: 'SNOW' });
             }
 
-            // Move & Collision
+            // Obstacles & Collision
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let o = obstacles[i];
-                o.x -= speed;
                 
-                // Simple AABB Collision
-                if (dino.x + 5 < o.x + o.w && dino.x + dino.w - 5 > o.x && 
-                    dino.y + 5 < o.y + o.h && dino.y + dino.h - 5 > o.y) {
+                if (o.type === 'METEOR') {
+                    o.x += o.vx; o.y += o.vy;
+                } else if (o.type === 'BIRD') {
+                    o.x -= (speed + 2);
+                    o.sin += 0.15;
+                    o.y += Math.sin(o.sin) * 3;
+                } else {
+                    o.x -= speed;
+                }
+
+                // Fair Collision (Hitbox shrinking)
+                if (dino.x + 10 < o.x + o.w && dino.x + dino.w - 10 > o.x && 
+                    dino.y + 10 < o.y + o.h && dino.y + dino.h - 5 > o.y) {
                     gameOver();
                 }
-                if (o.x < -100) obstacles.splice(i, 1);
+
+                if (o.x < -200 || o.y > V_HEIGHT + 100) obstacles.splice(i, 1);
             }
 
-            for (let i = weatherParticles.length - 1; i >= 0; i--) {
-                let p = weatherParticles[i];
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
                 p.x += p.vx; p.y += p.vy;
-                if (p.y > height) weatherParticles.splice(i, 1);
+                if(p.type === 'DUST') p.life -= 0.02;
+                if (p.y > V_HEIGHT || p.life <= 0) particles.splice(i, 1);
             }
 
-            speed += 0.0005;
+            speed += 0.0015;
             draw();
-            
-            // Only request next frame if game is still active
-            if (gameActive) {
-                requestAnimationFrame(update);
-            }
+            if (gameActive) requestAnimationFrame(update);
         }
 
         function draw() {
-            ctx.clearRect(0, 0, width, height);
+            ctx.clearRect(0, 0, V_WIDTH, V_HEIGHT);
 
-            // Ground
-            ctx.fillStyle = weather === "COLD" ? "#457b9d" : "#333";
-            ctx.fillRect(0, height - 15, width, 2);
-
-            // Weather
-            weatherParticles.forEach(p => {
-                ctx.fillStyle = p.type === 'RAIN' ? "#4ade80" : "#fff";
-                ctx.fillRect(p.x, p.y, p.type === 'RAIN' ? 1 : 3, p.type === 'RAIN' ? 8 : 3);
+            // Mountains
+            ctx.fillStyle = weather === "COLD" ? "#1e2e3d" : "#2a3d15";
+            mountains.forEach(m => {
+                ctx.beginPath();
+                ctx.moveTo(m.x, V_HEIGHT - 30);
+                ctx.lineTo(m.x + m.w/2, V_HEIGHT - 180);
+                ctx.lineTo(m.x + m.w, V_HEIGHT - 30);
+                ctx.fill();
             });
 
-            // Obstacles
+            // Clouds
+            ctx.fillStyle = "rgba(255,255,255,0.1)";
+            clouds.forEach(c => {
+                ctx.fillRect(c.x, c.y, c.w, 10);
+                ctx.fillRect(c.x + 10, c.y - 10, c.w - 20, 10);
+            });
+
+            // Ground
+            ctx.fillStyle = weather === "COLD" ? "#8fb8d0" : "#3d5205";
+            ctx.fillRect(0, V_HEIGHT - 35, V_WIDTH, 40);
+
+            // Particles
+            particles.forEach(p => {
+                if(p.type === 'RAIN') { ctx.fillStyle = "#4ade80"; ctx.fillRect(p.x, p.y, 1, 10); }
+                else if(p.type === 'SNOW') { ctx.fillStyle = "#fff"; ctx.fillRect(p.x, p.y, 4, 4); }
+                else if(p.type === 'DUST') { ctx.fillStyle = `rgba(255,255,255,${p.life * 0.3})`; ctx.fillRect(p.x, p.y, 6, 6); }
+            });
+
+            // Draw Obstacles
             obstacles.forEach(o => {
-                if (o.type === "CACTUS") drawCactus(o.x, o.y, o.w, o.h);
-                else {
-                    ctx.fillStyle = "#e02b2b";
-                    ctx.fillRect(o.x, o.y + (Math.sin(frame*0.2)*10), o.w, o.h);
+                if (o.type === 'CACTUS') {
+                    ctx.fillStyle = weather === "COLD" ? "#a8dadc" : "#8dbd0c";
+                    ctx.fillRect(o.x + 6, o.y, 10, o.h); // trunk
+                    ctx.fillRect(o.x, o.y + 15, 7, 10); // L-arm
+                    ctx.fillRect(o.x + 15, o.y + 22, 7, 10); // R-arm
+                } else if (o.type === 'BIRD') {
+                    ctx.fillStyle = "#ff4d4d";
+                    ctx.fillRect(o.x, o.y, o.w, o.h); // Body
+                    ctx.fillStyle = "#fff"; // Wing highlight
+                    let flap = Math.sin(frame * 0.2) * 10;
+                    ctx.fillRect(o.x + 5, o.y + (o.h/2) + flap, 15, 4);
+                } else if (o.type === 'METEOR') {
+                    ctx.fillStyle = "#ffaa00";
+                    ctx.fillRect(o.x, o.y, o.w, o.h);
+                    ctx.fillStyle = "rgba(255, 60, 0, 0.5)";
+                    ctx.fillRect(o.x + 10, o.y - 15, 20, 20); // Trail
                 }
             });
 
             // Dino
             ctx.save();
-            ctx.translate(dino.x, dino.y);
-            if (!dino.grounded) {
-                ctx.scale(0.9, 1.1);
-            } else {
-                ctx.translate(0, Math.sin(frame*0.3)*2);
-            }
+            let stretch = dino.dy < 0 ? 0.8 : (dino.dy > 0 ? 1.1 : 1);
+            let squash = dino.dy < 0 ? 1.2 : (dino.dy > 0 ? 0.9 : 1);
+            ctx.translate(dino.x + dino.w/2, dino.y + dino.h);
+            ctx.scale(stretch, squash);
             ctx.fillStyle = "#8dbd0c";
             ctx.fillRect(-dino.w/2, -dino.h, dino.w, dino.h);
             ctx.fillStyle = "#000";
-            ctx.fillRect(2, -dino.h + 6, 4, 4);
+            ctx.fillRect(8, -dino.h + 8, 6, 6);
             ctx.restore();
         }
 
         function gameOver() {
             gameActive = false;
-            playSound(100, 'sawtooth', 0.5);
             if (score > highscore) {
                 highscore = Math.floor(score);
-                localStorage.setItem("dino-hi-v2", highscore);
+                localStorage.setItem("dino-hi-v4", highscore);
                 highEl.innerText = highscore.toString().padStart(4, '0');
             }
             overlay.style.display = "flex";
         }
 
-        function handleInput() {
+        function handleInput(e) {
+            if(e) e.preventDefault();
             if (!gameActive) return;
             if (dino.grounded) {
-                dino.dy = -14;
+                dino.dy = -16;
                 dino.grounded = false;
-                playSound(400, 'square', 0.1);
             }
         }
 
-        window.addEventListener("keydown", e => { if (e.code === "Space" || e.key === "w") handleInput(); });
-        window.addEventListener("touchstart", e => { 
-            if(gameActive) {
-                handleInput(); 
-                e.preventDefault(); 
-            }
-        }, {passive: false});
-        
-        canvas.addEventListener("mousedown", handleInput);
+        revolveBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            resetGame();
+        });
 
-        init();
+        window.addEventListener("resize", resize);
+        window.addEventListener("keydown", e => { 
+            if (e.code === "Space" || e.key === "ArrowUp") handleInput(); 
+        });
+        
+        container.addEventListener("touchstart", (e) => {
+            if(e.target !== revolveBtn) handleInput(e);
+        }, {passive: false});
+
+        container.addEventListener("mousedown", (e) => {
+            if(e.target !== revolveBtn) handleInput(e);
+        });
+
+        highEl.innerText = highscore.toString().padStart(4, '0');
+        resize();
+        resetGame();
     </script>
 </body>
 </html>
