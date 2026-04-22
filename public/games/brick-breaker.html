@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Breaker: 8-Bit Edition</title>
+    <style>
+        :root {
+            --bg: #000;
+            --paddle: #00ffcc;
+            --ball: #fff;
+            --brick: #ff0055;
+        }
+
+        * {
+            box-sizing: border-box;
+            touch-action: none;
+            user-select: none;
+        }
+
+        body {
+            margin: 0;
+            background: #111;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 90vw;
+            height: 90vh;
+            max-width: 400px;
+            max-height: 600px;
+            border: 4px solid #333;
+            image-rendering: pixelated; /* Keeps pixels sharp */
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            font-size: 1rem;
+            pointer-events: none;
+            z-index: 5;
+            text-shadow: 2px 2px 0px #000;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            text-align: center;
+        }
+
+        .btn {
+            background: transparent;
+            color: #0f0;
+            border: 2px solid #0f0;
+            padding: 10px 20px;
+            font-size: 1rem;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .btn:hover { background: #0f0; color: #000; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui">SCORE: <span id="scoreText">0000</span></div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+        <h1 id="title">NEON_PIXEL</h1>
+        <p>[ CLICK TO START ]</p>
+        <button class="btn" id="startBtn">BOOT_GAME</button>
+    </div>
+</div>
+
+<script>
+    // Audio Engine
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration, vol = 0.1) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type; // square, sawtooth, triangle
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const overlay = document.getElementById('overlay');
+    const scoreText = document.getElementById('scoreText');
+
+    // Low-Res Internal Resolution (160x240 for that chunky look)
+    const renderW = 160;
+    const renderH = 240;
+    canvas.width = renderW;
+    canvas.height = renderH;
+
+    let score = 0;
+    let gameActive = false;
+    
+    const paddle = { w: 32, h: 6, x: (renderW-32)/2, targetX: (renderW-32)/2 };
+    const ball = { x: 0, y: 0, dx: 1.5, dy: -1.5, r: 3 };
+    let bricks = [];
+
+    function initBricks() {
+        bricks = [];
+        const cols = 6;
+        const rows = 5;
+        const bW = 22;
+        const bH = 8;
+        for (let c = 0; c < cols; c++) {
+            for (let r = 0; r < rows; r++) {
+                bricks.push({
+                    x: c * (bW + 2) + 10,
+                    y: r * (bH + 2) + 40,
+                    w: bW,
+                    h: bH,
+                    active: true,
+                    color: `hsl(${r * 60}, 100%, 50%)`
+                });
+            }
+        }
+    }
+
+    // Controls
+    const movePaddle = (x) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = renderW / rect.width;
+        paddle.targetX = (x - rect.left) * scaleX - paddle.w / 2;
+    };
+
+    window.addEventListener('mousemove', e => movePaddle(e.clientX));
+    window.addEventListener('touchmove', e => {
+        movePaddle(e.touches[0].clientX);
+        e.preventDefault();
+    }, {passive: false});
+
+    function update() {
+        if (!gameActive) return;
+
+        // Smooth movement but keep integer values for pixel perfect look
+        paddle.x += (paddle.targetX - paddle.x) * 0.3;
+        paddle.x = Math.max(0, Math.min(renderW - paddle.w, paddle.x));
+
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        // Bounce Walls
+        if (ball.x < 0 || ball.x + ball.r > renderW) {
+            ball.dx *= -1;
+            playSound(400, 'square', 0.1);
+        }
+        if (ball.y < 0) {
+            ball.dy *= -1;
+            playSound(450, 'square', 0.1);
+        }
+
+        // Paddle Collision
+        if (ball.y + ball.r > renderH - 20) {
+            if (ball.x > paddle.x && ball.x < paddle.x + paddle.w) {
+                ball.dy = -Math.abs(ball.dy);
+                ball.dx = (ball.x - (paddle.x + paddle.w/2)) / 8;
+                playSound(600, 'triangle', 0.15);
+            } else if (ball.y > renderH) {
+                gameOver();
+            }
+        }
+
+        // Brick Collision
+        bricks.forEach(b => {
+            if (b.active && ball.x > b.x && ball.x < b.x + b.w && ball.y > b.y && ball.y < b.y + b.h) {
+                b.active = false;
+                ball.dy *= -1;
+                score += 10;
+                scoreText.innerText = score.toString().padStart(4, '0');
+                playSound(200 + (score % 1000), 'sawtooth', 0.1);
+            }
+        });
+    }
+
+    function draw() {
+        // Clear screen (No trails for pure pixel feel)
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, renderW, renderH);
+
+        // Bricks
+        bricks.forEach(b => {
+            if (b.active) {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(Math.floor(b.x), Math.floor(b.y), b.w, b.h);
+                // Highlight
+                ctx.fillStyle = "rgba(255,255,255,0.3)";
+                ctx.fillRect(Math.floor(b.x), Math.floor(b.y), b.w, 2);
+            }
+        });
+
+        // Paddle
+        ctx.fillStyle = "#0f0";
+        ctx.fillRect(Math.floor(paddle.x), renderH - 20, paddle.w, paddle.h);
+
+        // Ball (Square pixel ball)
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(Math.floor(ball.x), Math.floor(ball.y), ball.r, ball.r);
+
+        update();
+        requestAnimationFrame(draw);
+    }
+
+    function gameOver() {
+        gameActive = false;
+        playSound(150, 'sawtooth', 0.5);
+        document.getElementById('title').innerText = "SYSTEM_FAILURE";
+        startBtn.innerText = "REBOOT";
+        overlay.classList.remove('hidden');
+    }
+
+    startBtn.addEventListener('click', () => {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        score = 0;
+        scoreText.innerText = "0000";
+        ball.x = renderW / 2;
+        ball.y = renderH / 2;
+        ball.dx = 1.5;
+        ball.dy = 1.5;
+        initBricks();
+        gameActive = true;
+        overlay.classList.add('hidden');
+        playSound(800, 'square', 0.2);
+    });
+
+    draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pixel Hoops Ultimate (Perfect Pixel & Audio)</title>
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --ball: #ff8a00;
+            --rim: #ff0055;
+            --neon: #00f2ff;
+        }
+
+        * { box-sizing: border-box; touch-action: none; user-select: none; }
+
+        body {
+            margin: 0; background: #000; color: white;
+            font-family: 'Courier New', Courier, monospace; 
+            height: 100vh; width: 100vw;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            overflow: hidden;
+        }
+
+        #ui {
+            width: 100%; max-width: 400px; padding: 15px;
+            display: flex; justify-content: space-between; font-size: 1.5rem;
+            color: var(--neon); font-weight: bold; z-index: 5;
+            text-shadow: 4px 4px 0px rgba(0, 242, 255, 0.2);
+        }
+
+        #game-container {
+            position: relative; 
+            width: 95vw; height: 80vh; 
+            max-width: 400px; max-height: 600px;
+            border: 6px solid #333;
+            background: var(--bg);
+            box-shadow: 8px 8px 0px rgba(0, 242, 255, 0.15);
+        }
+
+        /* Forces perfect pixel rendering */
+        canvas { 
+            width: 100%; height: 100%; display: block; 
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated; 
+            image-rendering: crisp-edges;
+        }
+
+        /* Retro CRT Scanlines */
+        #scanlines {
+            position: absolute; inset: 0; z-index: 2; pointer-events: none;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 4px, 6px 100%;
+        }
+
+        #overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; justify-content: center; 
+            align-items: center; z-index: 10; text-align: center;
+            border: 8px double var(--rim); margin: 15px;
+        }
+
+        h1 {
+            color: var(--rim); margin: 0; font-size: 3rem;
+            text-shadow: 4px 4px 0px #880022;
+        }
+
+        .hidden { display: none !important; }
+
+        .btn {
+            background: var(--neon); color: black; border: none; padding: 15px 30px;
+            font-size: 1.2rem; font-family: inherit; font-weight: bold; cursor: pointer;
+            box-shadow: 6px 6px 0px #fff;
+            transition: transform 0.1s;
+            margin-top: 20px;
+        }
+        .btn:active { transform: translate(6px, 6px); box-shadow: 0px 0px 0px #fff; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div>STREAK: <span id="streak">0</span></div>
+        <div>BEST: <span id="best">0</span></div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="scanlines"></div>
+        <div id="overlay">
+            <h1>PIXEL<br>HOOPS</h1>
+            <p style="font-size: 1rem; color: #aaa; margin: 10px 0 20px;">DRAG ANYWHERE TO SHOOT</p>
+            <button class="btn" id="startBtn">BOOT SYSTEM</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const overlay = document.getElementById('overlay');
+
+    // Fixed Internal Resolution for pure 8-bit feel
+    const GW = 160; 
+    const GH = 240;
+
+    let streak = 0, best = 0;
+    let gameActive = false;
+    let shake = 0;
+
+    const GRAVITY = 0.22;
+    const FRICTION = 0.6;
+    
+    let ball = { x: 30, y: 0, r: 5, vx: 0, vy: 0, shooting: false, scored: false };
+    let hoop = { x: GW - 30, y: 70, r: 10 };
+    let drag = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+
+    // --- AUDIO SYSTEM (Web Audio API) ---
+    let audioCtx;
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playSound(type) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        
+        if (type === 'start') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
+            osc.start(now); osc.stop(now + 0.3);
+        } else if (type === 'shoot') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(200, now);
+            osc.frequency.exponentialRampToValueAtTime(400, now + 0.15);
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+            osc.start(now); osc.stop(now + 0.15);
+        } else if (type === 'bounce') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, now);
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+            osc.start(now); osc.stop(now + 0.05);
+        } else if (type === 'score') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(440, now); // A4
+            osc.frequency.setValueAtTime(554, now + 0.1); // C#5
+            osc.frequency.setValueAtTime(659, now + 0.2); // E5
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.linearRampToValueAtTime(0, now + 0.4);
+            osc.start(now); osc.stop(now + 0.4);
+        } else if (type === 'miss') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.linearRampToValueAtTime(0, now + 0.3);
+            osc.start(now); osc.stop(now + 0.3);
+        }
+    }
+    // ------------------------------------
+
+    function init() {
+        canvas.width = GW;
+        canvas.height = GH;
+        ctx.imageSmoothingEnabled = false; // Prevent blurring
+        resetBall();
+    }
+
+    function resetBall() {
+        ball.x = 30;
+        ball.y = GH - 40;
+        ball.vx = 0;
+        ball.vy = 0;
+        ball.shooting = false;
+        ball.scored = false;
+    }
+
+    function getInputPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        
+        return {
+            x: (clientX - rect.left) / (rect.width / GW),
+            y: (clientY - rect.top) / (rect.height / GH)
+        };
+    }
+
+    function handleStart(e) {
+        if (!gameActive || ball.shooting) return;
+        const pos = getInputPos(e);
+        drag.x1 = pos.x; drag.y1 = pos.y;
+        drag.x2 = pos.x; drag.y2 = pos.y;
+        drag.active = true;
+    }
+
+    function handleMove(e) {
+        if (!drag.active) return;
+        const pos = getInputPos(e);
+        drag.x2 = pos.x; drag.y2 = pos.y;
+    }
+
+    function handleEnd() {
+        if (!drag.active) return;
+        drag.active = false;
+        
+        ball.vx = (drag.x1 - drag.x2) * 0.14;
+        ball.vy = (drag.y1 - drag.y2) * 0.14;
+        
+        if (Math.abs(ball.vx) > 0.5 || Math.abs(ball.vy) > 0.5) {
+            ball.shooting = true;
+            playSound('shoot');
+        } else {
+            resetBall();
+        }
+    }
+
+    // Input Listeners
+    canvas.addEventListener('mousedown', handleStart);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleStart(e); }, {passive: false});
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); handleMove(e); }, {passive: false});
+    canvas.addEventListener('touchend', handleEnd);
+
+    function drawPixelCircle(x, y, r, color) {
+        ctx.fillStyle = color;
+        const ix = Math.floor(x), iy = Math.floor(y);
+        for (let i = -r; i <= r; i++) {
+            for (let j = -r; j <= r; j++) {
+                if (i * i + j * j <= r * r) ctx.fillRect(ix + i, iy + j, 1, 1);
+            }
+        }
+    }
+
+    function drawTrajectory() {
+        if (!drag.active) return;
+        
+        let sVX = (drag.x1 - drag.x2) * 0.14;
+        let sVY = (drag.y1 - drag.y2) * 0.14;
+        let sX = ball.x;
+        let sY = ball.y;
+
+        ctx.fillStyle = "rgba(0, 242, 255, 0.6)";
+        for (let i = 0; i < 25; i++) {
+            sVY += GRAVITY;
+            sX += sVX;
+            sY += sVY;
+            if (i % 2 === 0) ctx.fillRect(Math.floor(sX), Math.floor(sY), 2, 2);
+        }
+    }
+
+    function update() {
+        if (!gameActive || !ball.shooting) return;
+
+        ball.vy += GRAVITY;
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+
+        // Rim Physics
+        const rL = hoop.x - hoop.r;
+        const rR = hoop.x + hoop.r;
+
+        [rL, rR].forEach(rx => {
+            let dx = ball.x - rx;
+            let dy = ball.y - hoop.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist < ball.r + 1) {
+                if (Math.abs(ball.vy) > 1 || Math.abs(ball.vx) > 1) {
+                    playSound('bounce');
+                }
+                ball.vx = (dx / dist) * 2.5; 
+                ball.vy *= -FRICTION;
+                shake = 3;
+            }
+        });
+
+        // Scoring Logic
+        if (!ball.scored && ball.vy > 0 && 
+            Math.abs(ball.y - hoop.y) < 5 &&
+            ball.x > rL && ball.x < rR) {
+            ball.scored = true;
+            streak++;
+            shake = 6;
+            playSound('score');
+            if (streak > best) best = streak;
+            document.getElementById('streak').innerText = streak;
+            document.getElementById('best').innerText = best;
+        }
+
+        // Out of bounds reset
+        if (ball.y > GH + 20 || ball.x < -20 || ball.x > GW + 20) {
+            if(!ball.scored && ball.shooting) {
+                streak = 0;
+                playSound('miss');
+                document.getElementById('streak').innerText = 0;
+            }
+            resetBall();
+        }
+    }
+
+    function render() {
+        // Screen Shake
+        ctx.save();
+        if (shake > 0) {
+            let sx = Math.floor((Math.random() - 0.5) * shake);
+            let sy = Math.floor((Math.random() - 0.5) * shake);
+            ctx.translate(sx, sy);
+            shake *= 0.8;
+            if(shake < 0.5) shake = 0;
+        }
+
+        // Clear
+        ctx.fillStyle = "#0a0a0f";
+        ctx.fillRect(0, 0, GW, GH);
+
+        // Draw Environment (Net/Board)
+        ctx.fillStyle = "#222233";
+        ctx.fillRect(hoop.x + hoop.r, hoop.y - 30, 4, 80); // Chunky Pole
+        
+        ctx.fillStyle = "#ff0055";
+        ctx.fillRect(hoop.x - hoop.r, hoop.y, hoop.r * 2, 3); // Rim
+        
+        // Pixel Net
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        for(let i=0; i<3; i++) {
+            ctx.fillRect(hoop.x - hoop.r + 2 + (i*6), hoop.y + 3, 2, 12);
+        }
+
+        // Draw Trajectory and Ball
+        drawTrajectory();
+        
+        // Draw 8-bit Ball
+        drawPixelCircle(ball.x, ball.y, ball.r, "#ff8a00");
+        
+        // Ball details (Pixel Lines)
+        ctx.fillStyle = "#884400";
+        ctx.fillRect(Math.floor(ball.x), Math.floor(ball.y) - ball.r + 1, 1, ball.r * 2 - 2);
+        ctx.fillRect(Math.floor(ball.x) - ball.r + 1, Math.floor(ball.y), ball.r * 2 - 2, 1);
+        
+        // Pixel Highlight (Shine)
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(Math.floor(ball.x - 2), Math.floor(ball.y - 2), 2, 2);
+
+        ctx.restore();
+        
+        update();
+        requestAnimationFrame(render);
+    }
+
+    startBtn.onclick = (e) => {
+        e.stopPropagation();
+        initAudio();
+        playSound('start');
+        gameActive = true;
+        overlay.classList.add('hidden');
+        init();
+    };
+
+    window.addEventListener('resize', init);
+    init();
+    render();
+</script>
+</body>
+</html>
