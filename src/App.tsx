@@ -47,7 +47,7 @@ const GAMES: Game[] = [
   { id: '19', title: 'BASKETBALL', filename: 'basketball.html', color: 'cyan', icon:  Cpu },
   { id: '20', title: 'SUDOKU', filename: 'sudoku.html', color: 'cyan', icon: Zap },
   { id: '21', title: 'FALLING', filename: 'gravity-fall.html', color: 'cyan', icon: Monitor },
-  { id: '22', title: 'BRIILBREAKER', filename: 'mini-army.html', color: 'cyan', icon: Monitor }
+  { id: '22', title: 'BRICK-BROCK', filename: 'brick-breaker.html', color: 'cyan', icon: Monitor }
 ];
 
 // --- Audio Utility ---
