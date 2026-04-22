@@ -43,6 +43,11 @@ const GAMES: Game[] = [
   { id: '15', title: 'GALAXY OVERLORD', filename: 'galaxy-overlord.html', color: 'neon', icon: Zap },
   { id: '16', title: 'TIC TAC TOE', filename: 'tic-tac-toe.html', color: 'gold', icon: Gamepad2 },
   { id: '17', title: 'RETRO SNAKE', filename: 'snake.html', color: 'cyan', icon: Gamepad2 },
+  { id: '18', title: 'MINI-ARMY', filename: 'mini-army.html', color: 'cyan', icon: Monitor },
+  { id: '19', title: 'BASKETBALL', filename: 'basketball.html', color: 'cyan', icon:  Cpu },
+  { id: '20', title: 'SUDOKU', filename: 'sudoku.html', color: 'cyan', icon: Zap },
+  { id: '21', title: 'FALLING', filename: 'gravity-fall.html', color: 'cyan', icon: Monitor },
+  { id: '22', title: 'BRIILBREAKER', filename: 'mini-army.html', color: 'cyan', icon: Monitor }
 ];
 
 // --- Audio Utility ---
